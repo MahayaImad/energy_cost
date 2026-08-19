@@ -12,7 +12,12 @@ dependencies = [
     # resolved 1.31 produced runs stuck in `pending` (CLI/SuperLink version
     # mismatch) and a SuperLink that would not start against a 1.33 state DB.
     "flwr[simulation]>=1.33.0",
-    "flwr-datasets[vision]>=0.6.0",
+    # Must stay below 0.6.0: flwr-datasets 0.6.0 requires rich<14, while
+    # flwr>=1.33 requires rich>=14, and pip cannot resolve both. 0.5.0
+    # declares no rich constraint at all, so it coexists with 1.33/1.34; its
+    # only overlap with flwr is numpy, at an identical range. Revisit when a
+    # flwr-datasets release relaxes the rich bound.
+    "flwr-datasets[vision]>=0.5.0,<0.6.0",
     "torch==2.10.0",
     "torchvision==0.25.0",
     "nvidia-ml-py>=12.0.0",
