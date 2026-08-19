@@ -47,7 +47,19 @@ def train(msg: Message, context: Context):
     lr = float(msg.content["config"]["lr"])
     epochs = int(cfg["local-epochs"])
 
-    metrics = {"num-examples": n}
+    # partition_id travels with the metrics so the server can record which
+    # clients a round actually drew. Without it, a per-round energy difference
+    # between two epsilon conditions cannot be told apart from the two rounds
+    # simply having sampled differently-sized partitions.
+    metrics = {
+        "num-examples": n,
+        "partition_id": context.node_config["partition-id"],
+        # Reported so the server can prove the clients trained on the GPU
+        # NVML is watching. If Ray hands a ClientApp no GPU, training falls
+        # back to CPU, the run completes normally, and every joule recorded
+        # is the energy of an idle card. Silent, and fatal to the results.
+        "device_cuda": 1.0 if device.type == "cuda" else 0.0,
+    }
 
     if dp.is_private(epsilon):
         model = dp.validate_model(model)
@@ -74,7 +86,13 @@ def train(msg: Message, context: Context):
 
     # Must be identical across every epsilon, or the energy axis is measuring
     # workload size instead of the cost of privacy. Check this first.
+    #
+    # expected_steps is the deterministic cap ceil(n/B)*epochs that the
+    # accountant was calibrated against; local_steps is what actually ran.
+    # Any gap between them means the privacy accounting and the executed
+    # workload disagree, so both are logged and analyze.py compares them.
     metrics["local_steps"] = nsteps
+    metrics["expected_steps"] = dp.steps_per_epoch(n, int(cfg["batch-size"])) * epochs
     metrics["train_loss"] = train_loss
 
     content = RecordDict(
@@ -109,5 +127,4 @@ def evaluate(msg: Message, context: Context):
             )
         }
     )
-    metrics["expected_steps"] = dp.steps_per_epoch(n, int(cfg["batch-size"])) * epochs
     return Message(content=content, reply_to=msg)

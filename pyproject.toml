@@ -8,7 +8,10 @@ version = "0.1.0"
 description = "Energy cost of privacy in federated learning"
 license = { file = "LICENSE" }
 dependencies = [
-    "flwr[simulation]>=1.31.0",
+    # >=1.33 is required, not merely preferred: a rebuild that silently
+    # resolved 1.31 produced runs stuck in `pending` (CLI/SuperLink version
+    # mismatch) and a SuperLink that would not start against a 1.33 state DB.
+    "flwr[simulation]>=1.33.0",
     "flwr-datasets[vision]>=0.6.0",
     "torch==2.10.0",
     "torchvision==0.25.0",
@@ -62,3 +65,6 @@ batch-size = 32
 local-epochs = 1
 learning-rate = 0.01
 save-model = false
+# Seconds of quiet-GPU sampling used to establish the idle baseline that
+# net-of-idle energy subtracts. 0 falls back to a single instantaneous read.
+idle-probe-s = 5.0

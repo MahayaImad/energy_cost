@@ -40,6 +40,21 @@ train_private therefore caps each local epoch at a deterministic
 steps_per_epoch = ceil(n / batch_size), and that same count is what the
 accountant is calibrated against. Report the cap.
 
+Verified empirically by verify_dp.py check 0.2:
+Opacus' DPDataLoader already yields exactly ceil(n / batch_size) batches per
+epoch, because it sets sample_rate = 1/len(loader). The cap therefore never
+binds -- it is a guard, not an active constraint -- and the DP branch takes
+exactly the same number of optimiser steps as the non-private branch, for
+every epsilon. What Poisson sampling still randomises is the SIZE of each
+batch (Binomial(n, q)), so the examples processed per round vary by roughly
++/-2% around n while the step count does not. That residual is unbiased with
+respect to epsilon and averages out over rounds and seeds.
+
+Consequently, per-round step counts differing between two epsilon conditions
+can only come from the two rounds having sampled different clients, never
+from epsilon itself. server_app records sampled_partitions and steps_sum so
+this can be checked rather than assumed.
+
 Clipping norm C is FIXED across all epsilon values. Tuning C per epsilon
 would confound the privacy-utility comparison.
 """
@@ -99,7 +114,13 @@ def noise_multiplier_for(
     size, sigma differs per client -- correct (each client has its own budget
     over its own data), but the range must be reported.
     """
-    sample_rate = min(1.0, batch_size / max(n_examples, 1))
+    # Opacus does NOT sample at batch_size/n. DPDataLoader.from_data_loader
+    # sets sample_rate = 1/len(loader) = 1/ceil(n/batch_size), so calibrating
+    # against batch_size/n over-states q by 1-3% and yields a sigma that is
+    # accidentally conservative (measured: true epsilon lands 0.8-1.8% under
+    # target). Matching the sampler exactly makes the accounting tight
+    # instead of merely safe.
+    sample_rate = 1.0 / steps_per_epoch(n_examples, batch_size)
     steps = total_local_steps(
         n_examples, batch_size, num_rounds, fraction_train, local_epochs
     )
