@@ -63,15 +63,86 @@ class EnergyFedAvg(FedAvg):
         return super().configure_train(server_round, arrays, config, grid)
 
     def aggregate_train(self, server_round: int, replies):
+        # Materialise first: `replies` may be a one-shot iterator, and reading
+        # it here would hand super() an exhausted one.
+        replies = list(replies)
+        per_client = self._client_metrics(replies)
         out = super().aggregate_train(server_round, replies)
         try:
-            # FedAvg returns (ArrayRecord, MetricRecord)
+            # FedAvg returns (ArrayRecord, MetricRecord). Its metrics are
+            # num-examples-WEIGHTED MEANS, which is the wrong summary for a
+            # workload quantity: a mean cannot show whether two epsilon
+            # conditions did the same amount of compute. Sums come from
+            # per_client below; the means are kept for continuity.
             metrics = out[1] if isinstance(out, tuple) else out
-            self._train_metrics = {k: float(v) for k, v in dict(metrics).items()}
+            # Averaging an id or a boolean flag yields a number that means
+            # nothing; per_client records both properly.
+            drop = {"partition_id", "device_cuda"}
+            self._train_metrics = {
+                k: float(v) for k, v in dict(metrics or {}).items() if k not in drop
+            }
         except Exception as exc:  # never let logging break a run
             print(f"[warn] could not capture train metrics: {exc}")
             self._train_metrics = {}
+        self._train_metrics.update(per_client)
         return out
+
+    @staticmethod
+    def _client_metrics(replies) -> dict:
+        """Un-aggregated per-client training metrics for this round.
+
+        The energy claim rests on every epsilon condition executing the same
+        workload. Verifying that needs summed steps and summed examples --
+        the weighted means FedAvg returns cannot distinguish "same compute"
+        from "different compute, same average". Sigma min/max is recorded
+        because it varies with Dirichlet partition size, and the paper has to
+        report that range. sampled_partitions lets the analysis tell a real
+        epsilon effect apart from two conditions simply drawing different
+        clients in the same round.
+        """
+        steps, expected, examples, sigmas, parts = [], [], [], [], []
+        on_cuda = []
+        for reply in replies:
+            try:
+                if reply.has_error():
+                    continue
+                m = dict(reply.content["metrics"])
+            except Exception:
+                continue
+            if "local_steps" in m:
+                steps.append(float(m["local_steps"]))
+            if "expected_steps" in m:
+                expected.append(float(m["expected_steps"]))
+            if "num-examples" in m:
+                examples.append(float(m["num-examples"]))
+            if "noise_multiplier" in m:
+                sigmas.append(float(m["noise_multiplier"]))
+            if "partition_id" in m:
+                parts.append(int(m["partition_id"]))
+            if "device_cuda" in m:
+                on_cuda.append(float(m["device_cuda"]))
+
+        rec: dict = {
+            "n_clients": len(examples) or len(steps),
+            "steps_sum": sum(steps),
+            "expected_steps_sum": sum(expected),
+            "examples_sum": sum(examples),
+        }
+        if sigmas:
+            rec["sigma_min"] = min(sigmas)
+            rec["sigma_max"] = max(sigmas)
+        if parts:
+            rec["sampled_partitions"] = sorted(parts)
+        if on_cuda:
+            rec["clients_on_cuda"] = int(sum(on_cuda))
+            if sum(on_cuda) < len(on_cuda):
+                print(
+                    f"[FATAL] {len(on_cuda) - int(sum(on_cuda))}/{len(on_cuda)} "
+                    "ClientApps trained on CPU. NVML is measuring an idle GPU "
+                    "and this run's energy numbers are meaningless. Pass BOTH "
+                    "--init-args-num-gpus 1 and --client-resources-num-gpus."
+                )
+        return rec
 
     def aggregate_evaluate(self, server_round: int, replies):
         out = super().aggregate_evaluate(server_round, replies)
@@ -138,7 +209,18 @@ def main(grid: Grid, context: Context) -> None:
         fraction_evaluate=float(cfg["fraction-evaluate"]),
     )
 
-    idle_w = energy.power_w()
+    # Idle baseline. Net-of-idle energy is a headline number (it roughly
+    # doubles the apparent DP effect), so it is worth more than the single
+    # instantaneous sample this used to take: average over a short quiet
+    # window and keep the spread, so the paper can state how firm the
+    # baseline is. Set idle-probe-s to 0 to skip the probe.
+    probe_s = float(cfg.get("idle-probe-s", 5.0))
+    if probe_s > 0:
+        idle_w, idle_sd = energy.measure_idle_power_stats(probe_s)
+    else:
+        idle_w, idle_sd = energy.power_w(), 0.0
+    print(f"[energy] idle baseline {idle_w:.2f} W (sd {idle_sd:.2f}) over {probe_s:.0f}s")
+
     t_start = time.perf_counter()
 
     central: dict = {}
@@ -157,6 +239,13 @@ def main(grid: Grid, context: Context) -> None:
 
     total_s = time.perf_counter() - t_start
     total_j = sum(r["energy_j"] for r in strategy.rounds)
+    # Wall-clock actually covered by the energy counter. This is NOT total_s:
+    # the round window runs configure_train -> aggregate_evaluate, so run
+    # start-up, the central evaluation between rounds, and teardown fall
+    # outside it (~40% of total_s in practice). Subtracting idle over
+    # total_s while total_j only covers measured_s over-subtracts the idle
+    # draw of that uncovered time and understates net compute energy.
+    measured_s = sum(r["wall_s"] for r in strategy.rounds)
 
     run = {
         "run_id": cfg.get("run-id", datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")),
@@ -179,15 +268,23 @@ def main(grid: Grid, context: Context) -> None:
             "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
             "torch": torch.__version__,
             "cuda": torch.version.cuda,
-            "idle_power_w_at_start": round(idle_w, 2),
+            "idle_power_w_at_start": round(idle_w, 2),  # see totals.idle_power_w
         },
         "totals": {
+            # Gross round-bracketed energy, and the wall-clock it covers.
             "energy_j": round(total_j, 3),
-            "wall_s": round(total_s, 3),
-            # Idle-subtracted compute energy. Report this alongside the gross
-            # figure: at ~42 W measured against ~18 W idle, the net number is
-            # roughly 43% of gross and is the honest measure of compute cost.
-            "energy_j_net_idle": round(max(0.0, total_j - idle_w * total_s), 3),
+            "wall_s_measured": round(measured_s, 3),
+            # Whole-process wall-clock, including start-up, central
+            # evaluation and teardown. Reported for context only -- never
+            # divide energy_j by this.
+            "wall_s_total": round(total_s, 3),
+            "mean_power_w": round(total_j / measured_s, 2) if measured_s > 0 else None,
+            # Idle-subtracted compute energy: the honest measure of what the
+            # workload costs, and the figure the DP comparison should use.
+            # Subtracted over measured_s, matching the window energy_j covers.
+            "energy_j_net_idle": round(max(0.0, total_j - idle_w * measured_s), 3),
+            "idle_power_w": round(idle_w, 3),
+            "idle_power_w_sd": round(idle_sd, 3),
         },
         "rounds": strategy.rounds,
     }

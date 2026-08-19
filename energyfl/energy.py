@@ -62,6 +62,24 @@ def measure_idle_power(seconds: float = 20.0, samples: int = 40) -> float:
     return sum(readings) / len(readings)
 
 
+def measure_idle_power_stats(seconds: float = 5.0, interval: float = 0.25):
+    """(mean, sample sd) of idle board power over a quiet window.
+
+    Net-of-idle energy subtracts this baseline from every run, so a single
+    instantaneous reading is too thin a basis: report the spread alongside
+    the mean and let the paper state how firm the baseline is.
+    """
+    init()
+    n = max(2, int(seconds / interval))
+    readings = []
+    for _ in range(n):
+        readings.append(power_w())
+        time.sleep(interval)
+    mean = sum(readings) / len(readings)
+    var = sum((x - mean) ** 2 for x in readings) / (len(readings) - 1)
+    return mean, var ** 0.5
+
+
 class RoundEnergy:
     """Context manager measuring GPU joules and wall-clock over a block."""
 
@@ -87,4 +105,5 @@ if __name__ == "__main__":
     print("total-energy counter supported:", supports_total_energy())
     print("current power (W):", power_w())
     print("measuring idle power for 20s, keep the GPU quiet...")
-    print("idle power (W):", round(measure_idle_power(), 2))
+    m, sd = measure_idle_power_stats(20.0)
+    print(f"idle power (W): {m:.2f} +/- {sd:.2f}")
