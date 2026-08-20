@@ -420,12 +420,18 @@ def tables(by_eps):
     print("=" * 68)
 
     print("\n-- Per-round energy (separates fixed overhead from slowdown) --")
-    print(f"    {'eps':>6} {'gross W':>10} {'net W':>10} {'J/round':>10} {'sigma range':>20}")
+    print("    The overhead below is per-round ENERGY, net of idle. Power (W)")
+    print("    is the wrong basis for it: DP rounds draw more power AND run")
+    print("    longer, so a power ratio silently drops the second factor and")
+    print("    understates the cost. Joules per round carries both.")
+    print(f"    {'eps':>6} {'gross W':>9} {'net W':>9} {'gross J/rd':>11} "
+          f"{'net J/rd':>9} {'sigma range':>18}")
     base_net = None
     for eps, group in by_eps.items():
         gw = np.mean([total_energy(r) / measured_wall(r) for r in group])
         nw = np.mean([total_energy(r, True) / measured_wall(r) for r in group])
         jr = np.mean([total_energy(r) / len(r["rounds"]) for r in group])
+        njr = np.mean([total_energy(r, True) / len(r["rounds"]) for r in group])
         lo, hi = rounds_matrix(group, "sigma_min"), rounds_matrix(group, "sigma_max")
         sig = (
             "--"
@@ -433,15 +439,34 @@ def tables(by_eps):
             else f"{np.nanmin(lo):.3f} - {np.nanmax(hi):.3f}"
         )
         if math.isinf(eps_key(eps)):
-            base_net = nw
-        print(f"    {eps:>6} {gw:>10.2f} {nw:>10.2f} {jr:>10.0f} {sig:>20}")
+            base_net = njr
+        print(f"    {eps:>6} {gw:>9.2f} {nw:>9.2f} {jr:>11.0f} {njr:>9.1f} {sig:>18}")
+
     if base_net:
-        print(f"\n    DP overhead vs no-DP, net of idle (fixed per-round cost):")
+        print("\n    DP overhead per round vs no-DP, net of idle:")
+        dp_njr = []
         for eps, group in by_eps.items():
             if math.isinf(eps_key(eps)):
                 continue
-            nw = np.mean([total_energy(r, True) / measured_wall(r) for r in group])
-            print(f"      eps={eps:>4}: {100 * (nw - base_net) / base_net:+6.1f}%")
+            njr = np.mean([total_energy(r, True) / len(r["rounds"]) for r in group])
+            dp_njr.append(njr)
+            print(f"      eps={eps:>4}: {100 * (njr - base_net) / base_net:+6.1f}%")
+        m = float(np.mean(dp_njr))
+        spread = 100 * (max(dp_njr) - min(dp_njr)) / m
+        _, floor_pct = noise_floor(by_eps)
+        print(f"\n      mean across DP conditions: "
+              f"{100 * (m - base_net) / base_net:+.0f}%")
+        print(f"      spread across DP conditions: {spread:.1f}% of mean, "
+              f"against a {floor_pct:.1f}% noise floor")
+        if spread <= floor_pct * 1.75:
+            print("      -> flat in epsilon within resolution: the per-round cost")
+            print("         of DP is a FIXED implementation overhead (per-sample")
+            print("         gradients and clipping), not a function of the budget.")
+            print("         Everything epsilon-dependent lives in the round count,")
+            print("         which is what energy-to-target measures.")
+        else:
+            print("      -> NOT flat: the per-round cost varies with epsilon by")
+            print("         more than the instrument can attribute to noise.")
 
     print("\n-- Energy to target accuracy (the headline metric) --")
     for t in TARGET_ACCS:
