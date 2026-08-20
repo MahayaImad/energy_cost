@@ -71,13 +71,18 @@ def train(msg: Message, context: Context):
             fraction_train=float(cfg["fraction-train"]),
             local_epochs=epochs,
         )
+        # C is fixed at 1.0 for the main sweep -- tuning it per epsilon would
+        # confound the privacy-utility comparison. It is configurable only so
+        # the C ablation can vary it deliberately, one factor at a time.
+        clip = float(cfg.get("clipping-norm", dp.CLIPPING_NORM))
         train_loss, state_dict, nsteps = dp.train_private(
-            model, trainloader, epochs, lr, device, noise_multiplier=sigma
+            model, trainloader, epochs, lr, device,
+            noise_multiplier=sigma, max_grad_norm=clip,
         )
         # sigma varies with partition size; both belong in the paper's
         # reproducibility table.
         metrics["noise_multiplier"] = sigma
-        metrics["clipping_norm"] = dp.CLIPPING_NORM
+        metrics["clipping_norm"] = clip
     else:
         model.to(device)
         train_loss = train_fn(model, trainloader, epochs, lr, device)

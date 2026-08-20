@@ -30,7 +30,12 @@ from energyfl.task import (
 
 app = ServerApp()
 
-RESULTS_DIR = Path(os.environ.get("FL_RESULTS_DIR", "results"))
+# Default output directory. Overridable per run via the `results-dir` run
+# config -- NOT via an environment variable: the ServerApp runs as a child of
+# the detached local SuperLink daemon, which was started with the environment
+# of whichever `flwr run` first launched it, so env vars set on later
+# invocations never reach it. Run config travels with the run itself.
+DEFAULT_RESULTS_DIR = Path(os.environ.get("FL_RESULTS_DIR", "results"))
 
 
 class EnergyFedAvg(FedAvg):
@@ -263,6 +268,7 @@ def main(grid: Grid, context: Context) -> None:
             "local_epochs": int(cfg["local-epochs"]),
             "batch_size": int(cfg["batch-size"]),
             "learning_rate": float(cfg["learning-rate"]),
+            "clipping_norm": float(cfg.get("clipping-norm", 1.0)),
         },
         "hardware": {
             "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
@@ -289,9 +295,10 @@ def main(grid: Grid, context: Context) -> None:
         "rounds": strategy.rounds,
     }
 
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    results_dir = Path(str(cfg.get("results-dir", "")) or DEFAULT_RESULTS_DIR)
+    results_dir.mkdir(parents=True, exist_ok=True)
     eps = str(run["config"]["epsilon"]).replace(".", "p")
-    path = RESULTS_DIR / f"run_eps{eps}_seed{seed}_{run['run_id']}.json"
+    path = results_dir / f"run_eps{eps}_seed{seed}_{run['run_id']}.json"
     path.write_text(json.dumps(run, indent=2))
     print(
         f"\n[energy] wrote {path}  "
@@ -300,4 +307,4 @@ def main(grid: Grid, context: Context) -> None:
     )
 
     if bool(cfg.get("save-model", False)):
-        torch.save(result.arrays.to_torch_state_dict(), RESULTS_DIR / f"model_seed{seed}.pt")
+        torch.save(result.arrays.to_torch_state_dict(), results_dir / f"model_seed{seed}.pt")

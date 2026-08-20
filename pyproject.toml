@@ -70,6 +70,11 @@ batch-size = 32
 local-epochs = 1
 learning-rate = 0.01
 save-model = false
+# Clipping norm C. FIXED at 1.0 for the main sweep; the ablation overrides it.
+clipping-norm = 1.0
+# Where run_*.json is written. Overridden by the ablation script so those
+# runs never mix into the main sweep's statistics.
+results-dir = ""
 # Seconds of quiet-GPU sampling used to establish the idle baseline that
 # net-of-idle energy subtracts. 0 falls back to a single instantaneous read.
 idle-probe-s = 5.0
