@@ -48,6 +48,14 @@ GRID_GCO2_PER_KWH = {
 
 TARGET_ACCS = (0.15, 0.20, 0.25)
 
+# Carbon is reported per this many training runs. A single run emits well
+# under a gram, which is too small a quantity for a reader to reason about,
+# so the measured figure is scaled linearly. This is the SAME simulated
+# workload repeated, not an extrapolation to real edge hardware -- it stays
+# inside the study's "ratios hold, absolute per-device joules do not"
+# caveat, which scaling to a modelled device fleet would not.
+CARBON_RUNS = 1000
+
 
 # ------------------------------------------------------------------ loading
 
@@ -492,13 +500,28 @@ def tables(by_eps):
         note = "  <-- declines after peak" if fa < pa - 0.005 else ""
         print(f"    {eps:>6} {pr:>11} {pa:>10.4f} {fa:>10.4f} {wasted:>10.0f}{note}")
 
-    print("\n-- Carbon: gCO2eq for one full run, by grid --")
+    print(f"\n-- Carbon: gCO2eq per {CARBON_RUNS} training runs, by grid --")
+    print(f"    (one run is 1/{CARBON_RUNS} of these figures; the same measured")
+    print("     workload repeated, not an extrapolation to other hardware)")
     hdr = "".join(f"{k:>13}" for k in GRID_GCO2_PER_KWH)
     print(f"    {'eps':>6}{hdr}")
     for eps, group in by_eps.items():
-        kwh = np.mean([total_energy(r) for r in group]) / 3.6e6
-        row = "".join(f"{kwh * g:>13.2f}" for g in GRID_GCO2_PER_KWH.values())
+        kwh = np.mean([total_energy(r) for r in group]) / 3.6e6 * CARBON_RUNS
+        row = "".join(f"{kwh * g:>13.1f}" for g in GRID_GCO2_PER_KWH.values())
         print(f"    {eps:>6}{row}")
+
+    base = [g for e, g in by_eps.items() if math.isinf(eps_key(e))]
+    if base:
+        bkwh = np.mean([total_energy(r) for r in base[0]]) / 3.6e6 * CARBON_RUNS
+        print(f"\n    Carbon cost OF PRIVACY (DP minus no-DP), same scale:")
+        print(f"    {'eps':>6}{hdr}")
+        for eps, group in by_eps.items():
+            if math.isinf(eps_key(eps)):
+                continue
+            kwh = np.mean([total_energy(r) for r in group]) / 3.6e6 * CARBON_RUNS
+            row = "".join(f"{(kwh - bkwh) * g:>13.1f}"
+                          for g in GRID_GCO2_PER_KWH.values())
+            print(f"    {eps:>6}{row}")
 
 
 # ------------------------------------------------------------------ figures
@@ -591,11 +614,11 @@ def figures(by_eps, out: Path):
     fig, ax = plt.subplots(figsize=(5.5, 3.6))
     regions = list(GRID_GCO2_PER_KWH)
     for eps in labels:
-        kwh = np.mean([total_energy(r) for r in by_eps[eps]]) / 3.6e6
+        kwh = np.mean([total_energy(r) for r in by_eps[eps]]) / 3.6e6 * CARBON_RUNS
         ax.plot(regions, [kwh * GRID_GCO2_PER_KWH[g] for g in regions], "o-",
                 label=eps_label(eps), ms=4)
-    ax.set_ylabel("gCO$_2$eq per run")
-    ax.set_title("Same workload, same privacy, different grid")
+    ax.set_ylabel(f"gCO$_2$eq per {CARBON_RUNS} runs")
+    ax.set_title("Identical workload, different grid")
     ax.grid(alpha=0.3)
     ax.tick_params(axis="x", labelsize=7)
     ax.legend(fontsize=7, ncol=2)
