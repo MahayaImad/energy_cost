@@ -59,8 +59,11 @@ Clipping norm C is FIXED across all epsilon values. Tuning C per epsilon
 would confound the privacy-utility comparison.
 """
 
+import json
 import math
+import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Optional, Tuple
 
 import torch
@@ -100,6 +103,37 @@ def total_local_steps(
     return max(1, int(round(expected_rounds * local_epochs * spe)))
 
 
+# Disk cache of derived sigmas, written by prewarm_sigma.py before a sweep
+# and only read here. Populating it outside the run keeps the accountant's
+# binary search out of the energy-measurement window entirely -- see the
+# docstring below for why that matters. Read-only at run time, so concurrent
+# Ray actors cannot race on it.
+SIGMA_CACHE_PATH = Path(os.environ.get("FL_SIGMA_CACHE", ".sigma_cache.json"))
+_disk_cache: Optional[dict] = None
+
+
+def sigma_cache_key(
+    epsilon, n_examples, batch_size, num_rounds, fraction_train, local_epochs, delta
+) -> str:
+    """Stable string key. Must match between prewarm and run, exactly."""
+    return "|".join(
+        str(x) for x in (
+            float(epsilon), int(n_examples), int(batch_size), int(num_rounds),
+            float(fraction_train), int(local_epochs), float(delta),
+        )
+    )
+
+
+def _load_disk_cache() -> dict:
+    global _disk_cache
+    if _disk_cache is None:
+        try:
+            _disk_cache = json.loads(SIGMA_CACHE_PATH.read_text())
+        except (OSError, ValueError):
+            _disk_cache = {}
+    return _disk_cache
+
+
 @lru_cache(maxsize=4096)
 def noise_multiplier_for(
     epsilon: float,
@@ -128,10 +162,18 @@ def noise_multiplier_for(
     to epsilon=0.5, observed +19.7 s) while step counts stayed flat -- an
     accountant artefact masquerading as a cost of privacy.
 
-    sigma is a pure function of these arguments, so memoising is exact. The
-    first call per (client, epsilon) still lands inside round 1's window;
-    round 1 already carries CUDA warm-up and should be treated as a warm-up
-    round rather than a representative one.
+    sigma is a pure function of these arguments, so memoising is exact.
+
+    In-process memoisation alone is not enough. A client derives sigma on its
+    FIRST participation, which is still inside a measured round, and with 10
+    of 20 clients sampled per round roughly 4.8 rounds contain a first-time
+    client. That leaves a residual of about 4.8 x 0.69 s at epsilon=8 against
+    4.8 x 0.086 s at epsilon=0.5 -- predicted +2.9 s, measured +3.0 s. Small,
+    but correlated with epsilon, which is precisely the axis under study.
+
+    Hence the disk cache: prewarm_sigma.py derives every sigma the sweep
+    needs before any measurement starts, so at run time every lookup is a
+    dict hit and the accountant never runs inside the window.
     """
     # Opacus does NOT sample at batch_size/n. DPDataLoader.from_data_loader
     # sets sample_rate = 1/len(loader) = 1/ceil(n/batch_size), so calibrating
@@ -139,6 +181,13 @@ def noise_multiplier_for(
     # accidentally conservative (measured: true epsilon lands 0.8-1.8% under
     # target). Matching the sampler exactly makes the accounting tight
     # instead of merely safe.
+    hit = _load_disk_cache().get(
+        sigma_cache_key(epsilon, n_examples, batch_size, num_rounds,
+                        fraction_train, local_epochs, delta)
+    )
+    if hit is not None:
+        return float(hit)
+
     sample_rate = 1.0 / steps_per_epoch(n_examples, batch_size)
     steps = total_local_steps(
         n_examples, batch_size, num_rounds, fraction_train, local_epochs

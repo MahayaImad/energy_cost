@@ -59,6 +59,10 @@ echo "run order (${#PAIRS[@]} runs, shuffle=$SHUFFLE seed=$ORDER_SEED):"
 printf '  %s\n' "${PAIRS[@]}"
 echo
 
+# Derive every sigma before any measurement starts, so the accountant's
+# binary search never runs inside a measured round. Cheap, and idempotent.
+python prewarm_sigma.py
+
 for PAIR in "${PAIRS[@]}"; do
   read -r EPS SEED <<< "$PAIR"
   {

@@ -40,6 +40,8 @@ run_one() {  # name alpha clients epochs clip eps
     2>&1 | tee "logs/${tag}.log"
 }
 
+python prewarm_sigma.py --ablation
+
 for EPS in "${EPSILONS[@]}"; do
   # Partition skew. alpha=0.1 is severely non-IID, 10 is nearly IID.
   for A in 0.1 0.5 10; do
