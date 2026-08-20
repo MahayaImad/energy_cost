@@ -129,7 +129,123 @@ def noise_floor(by_eps):
     return worst_w, worst_pct
 
 
-def check(by_eps) -> bool:
+def _rank(xs):
+    """Ranks with ties averaged (for Spearman without pulling in scipy)."""
+    order = sorted(range(len(xs)), key=lambda i: xs[i])
+    ranks = [0.0] * len(xs)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and xs[order[j + 1]] == xs[order[i]]:
+            j += 1
+        avg = (i + j) / 2.0 + 1.0
+        for k in range(i, j + 1):
+            ranks[order[k]] = avg
+        i = j + 1
+    return ranks
+
+
+def spearman(xs, ys):
+    """Spearman rank correlation. Returns 0.0 when undefined."""
+    if len(xs) < 3:
+        return 0.0
+    rx, ry = _rank(xs), _rank(ys)
+    mx, my = sum(rx) / len(rx), sum(ry) / len(ry)
+    num = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    den = (
+        sum((a - mx) ** 2 for a in rx) * sum((b - my) ** 2 for b in ry)
+    ) ** 0.5
+    return num / den if den else 0.0
+
+
+def drift_check(runs) -> bool:
+    """Is wall-clock tracking epsilon, or just tracking execution order?
+
+    The sweep runs epsilon in a fixed descending order, so "slower at high
+    epsilon" and "slower early in the sweep" predict the same table. They are
+    completely different findings: one is a cost of privacy, the other is the
+    machine warming up. Correlating wall-clock against both separates them.
+
+    Nothing in DP-SGD makes runtime depend on the MAGNITUDE of sigma -- noise
+    is drawn from the same shaped tensor either way, and step counts are flat
+    across conditions. So a wall-clock trend in epsilon with flat step counts
+    is far more likely to be run-order drift, and must be ruled out before
+    any of it is attributed to privacy.
+    """
+    dated = [r for r in runs if r.get("timestamp_utc")]
+    if len(dated) < 4:
+        print("\n[5] Run-order drift: too few timestamped runs to assess")
+        return True
+    dated.sort(key=lambda r: r["timestamp_utc"])
+
+    walls, order_idx, eps_rank = [], [], []
+    print("\n[5] Run-order drift (runs in execution order)")
+    print(f"    {'#':>3} {'eps':>6} {'seed':>5} {'wall_s':>9} {'gross W':>9}  timestamp")
+    for i, r in enumerate(dated):
+        w = measured_wall(r)
+        e = eps_key(r["config"]["epsilon"])
+        walls.append(w)
+        order_idx.append(float(i))
+        # inf sorts last; use a large finite stand-in for ranking
+        eps_rank.append(1e9 if math.isinf(e) else e)
+        print(
+            f"    {i:>3} {str(r['config']['epsilon']):>6} {r['config']['seed']:>5} "
+            f"{w:>9.1f} {total_energy(r) / w:>9.2f}  {r['timestamp_utc'][:19]}"
+        )
+
+    rho_order = spearman(order_idx, walls)
+    rho_eps = spearman(eps_rank, walls)
+    # Same question restricted to DP runs, where epsilon actually varies and
+    # the non-private baseline cannot drive the correlation on its own.
+    dp = [
+        (o, e, w)
+        for o, e, w in zip(order_idx, eps_rank, walls)
+        if e < 1e9
+    ]
+    rho_order_dp = spearman([d[0] for d in dp], [d[2] for d in dp])
+    rho_eps_dp = spearman([d[1] for d in dp], [d[2] for d in dp])
+
+    print(f"\n    wall_s vs execution order : rho = {rho_order:+.3f}   "
+          f"(DP only: {rho_order_dp:+.3f})")
+    print(f"    wall_s vs epsilon         : rho = {rho_eps:+.3f}   "
+          f"(DP only: {rho_eps_dp:+.3f})")
+
+    # Are the two explanatory variables themselves confounded? If epsilon was
+    # swept in a fixed order, order and epsilon are near-perfectly
+    # rank-correlated and NO correlation computed on this data can separate
+    # them. Saying which one "wins" would then be an artefact of noise.
+    conf = spearman([d[0] for d in dp], [d[1] for d in dp])
+    print(f"    execution order vs epsilon: rho = {conf:+.3f}   <- design check")
+
+    ok = True
+    if abs(conf) > 0.8:
+        print("\n    FAIL: epsilon and execution order are confounded by design")
+        print(f"          (|rho| = {abs(conf):.2f}). The sweep visited epsilon in a")
+        print("          fixed order, so 'slower at high epsilon' and 'slower")
+        print("          early in the sweep' predict the same table and this")
+        print("          data cannot tell them apart. Note nothing in DP-SGD")
+        print("          makes runtime depend on the magnitude of sigma, and")
+        print("          step counts are flat across conditions, so drift is")
+        print("          the more likely of the two. Re-run: run_sweep.sh now")
+        print("          randomises run order, which breaks the confound.")
+        ok = False
+    elif abs(rho_order_dp) > 0.6 and abs(rho_order_dp) >= abs(rho_eps_dp):
+        print("\n    FAIL: with run order randomised, wall-clock still tracks")
+        print("          execution order more strongly than epsilon. The drift")
+        print("          is real and is not a privacy effect; find its cause")
+        print("          before quoting any energy number.")
+        ok = False
+    elif abs(rho_eps_dp) > 0.6:
+        print("\n    Wall-clock tracks epsilon under randomised order. This is")
+        print("    a real epsilon effect -- but check [1] and [2] first: with")
+        print("    step counts flat, the mechanism is not obvious and needs an")
+        print("    explanation before it goes in the paper.")
+    else:
+        print("\n    PASS: no strong drift in either direction.")
+    return ok
+
+
+def check(by_eps, runs=None) -> bool:
     ok = True
     print("=" * 68)
     print("PHASE-1 VERIFICATION")
@@ -169,16 +285,28 @@ def check(by_eps) -> bool:
             print("    PASS: flat within tolerance, ordering collapsed into noise.")
 
     print("\n[2] Executed steps vs steps the accountant was calibrated for")
+    print("    A shortfall of a step or two per round is an Opacus artefact,")
+    print("    not a bug here: it sets sample_rate = 1/len(loader) and then")
+    print("    takes int(1/sample_rate), and for some partition sizes the")
+    print("    float reciprocal lands just under the integer and floors down")
+    print("    (e.g. ceil(n/B)=93 yields 92 batches). It runs FEWER steps than")
+    print("    the accountant charged for, so epsilon stays an upper bound.")
+    print("    Only a shortfall above 0.5% of the round's steps is material.")
     for eps, group in by_eps.items():
         got = rounds_matrix(group, "steps_sum")
         want = rounds_matrix(group, "expected_steps_sum")
         if np.isnan(got).all() or np.isnan(want).all():
             print(f"    {eps:>6} : n/a (run predates steps_sum logging)")
             continue
-        d = np.nanmax(np.abs(got - want))
-        flag = "ok" if d < 1e-6 else "MISMATCH"
-        print(f"    {eps:>6} : max |executed - calibrated| = {d:.0f} steps  [{flag}]")
-        if d >= 1e-6:
+        d = float(np.nanmax(np.abs(got - want)))
+        pct = 100 * d / max(float(np.nanmean(want)), 1.0)
+        over = float(np.nanmax(got - want)) > 0
+        flag = "MATERIAL" if pct > 0.5 else ("over-run" if over else "ok")
+        print(
+            f"    {eps:>6} : max |executed - calibrated| = {d:.0f} steps "
+            f"({pct:.2f}% of round)  [{flag}]"
+        )
+        if pct > 0.5 or over:
             ok = False
 
     print("\n[3] Clients trained on the GPU")
@@ -198,6 +326,9 @@ def check(by_eps) -> bool:
     print(f"\n[4] Measurement noise floor: +/-{w:.2f} W ({pct:.2f}%)")
     print("    No effect smaller than this is resolvable. State it before")
     print("    claiming any energy difference.")
+
+    if runs:
+        ok = drift_check(runs) and ok
 
     print("\n" + ("VERDICT: PASS" if ok else "VERDICT: FAIL"))
     return ok
@@ -422,8 +553,8 @@ def main():
     ap.add_argument("--check", action="store_true", help="Phase-1 gate only")
     a = ap.parse_args()
 
-    _, by_eps = load(a.results)
-    ok = check(by_eps)
+    runs, by_eps = load(a.results)
+    ok = check(by_eps, runs)
     if a.check:
         sys.exit(0 if ok else 1)
     tables(by_eps)
