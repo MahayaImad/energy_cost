@@ -98,6 +98,18 @@ def total_energy(r, net=False):
     return max(0.0, t["energy_j"] - idle * measured_wall(r))
 
 
+def measured_wall_no_warmup(r):
+    """Round-bracketed wall-clock excluding round 1.
+
+    Round 1 is a warm-up round: it carries CUDA context creation, dataset
+    materialisation, and each client's first (uncached) sigma derivation.
+    Comparing conditions on rounds 2+ shows whether a trend survives once
+    those one-off costs are out of the way.
+    """
+    rs = r["rounds"][1:]
+    return sum(rd["wall_s"] for rd in rs) if rs else 0.0
+
+
 def measured_wall(r):
     """Wall-clock the energy counter actually covers.
 
@@ -253,14 +265,17 @@ def check(by_eps, runs=None) -> bool:
 
     dp_walls = {}
     print("\n[1] Wall-clock flatness across epsilon")
-    print(f"    {'eps':>6} {'n':>3} {'wall_s':>18} {'energy_J':>18} {'steps/round':>12}")
+    print(f"    {'eps':>6} {'n':>3} {'wall_s':>18} {'wall r>=2':>10} "
+          f"{'energy_J':>18} {'steps/round':>12}")
     for eps, group in by_eps.items():
         w = np.array([measured_wall(r) for r in group])
+        w2 = np.array([measured_wall_no_warmup(r) for r in group])
         e = np.array([total_energy(r) for r in group])
         st = rounds_matrix(group, "steps_sum")
         sm = "n/a" if np.isnan(st).all() else f"{np.nanmean(st):.0f}"
         print(
             f"    {eps:>6} {len(group):>3} {w.mean():>10.1f} +/-{w.std(ddof=0):>5.1f} "
+            f"{w2.mean():>10.1f} "
             f"{e.mean():>10.0f} +/-{e.std(ddof=0):>5.0f} {sm:>12}"
         )
         if not math.isinf(eps_key(eps)):
@@ -547,13 +562,72 @@ def figures(by_eps, out: Path):
     print(f"\nwrote fig1..fig4 to {out}/")
 
 
+ABLATION_FACTORS = {
+    "dirichlet_alpha": "alpha",
+    "num_supernodes": "clients",
+    "local_epochs": "epochs",
+    "clipping_norm": "C",
+}
+
+
+def ablations(runs):
+    """Report each ablation factor against the baseline configuration.
+
+    These runs deliberately change the workload, so unlike the main sweep a
+    per-round energy difference here is expected and is the point. What is
+    read off them is how the cost of privacy responds to a deployment choice:
+    energy-to-target under DP versus the same configuration without it.
+    """
+    base = {"dirichlet_alpha": 0.5, "num_supernodes": 20, "local_epochs": 1,
+            "clipping_norm": 1.0}
+
+    for field, label in ABLATION_FACTORS.items():
+        varied = sorted({r["config"].get(field) for r in runs
+                         if r["config"].get(field) is not None})
+        # A factor left at its baseline everywhere was not ablated.
+        if len(varied) < 2:
+            continue
+        print(f"\n-- {label} ({field}) --")
+        print(f"    {'value':>8} {'eps':>6} {'J/round':>10} {'net W':>8} "
+              f"{'final acc':>10} {'J to 0.20':>11} {'peak rd':>8}")
+        for v in varied:
+            # Hold every other factor at baseline so one thing varies at a time.
+            sel = [
+                r for r in runs
+                if r["config"].get(field) == v
+                and all(r["config"].get(k, base[k]) == base[k]
+                        for k in base if k != field)
+            ]
+            if not sel:
+                continue
+            for eps in sorted({str(r["config"]["epsilon"]) for r in sel},
+                              key=eps_key):
+                g = [r for r in sel if str(r["config"]["epsilon"]) == eps]
+                jr = np.mean([total_energy(r) / len(r["rounds"]) for r in g])
+                nw = np.mean([total_energy(r, True) / measured_wall(r) for r in g])
+                acc = np.nanmean(rounds_matrix(g, "central_acc")[:, -1])
+                j20, _, n20 = energy_to_target(g, 0.20, net=True)
+                pr, _, _ = peak_round(g)
+                j20s = "unreached" if n20 == 0 else f"{j20:.0f}"
+                print(f"    {str(v):>8} {eps:>6} {jr:>10.0f} {nw:>8.2f} "
+                      f"{acc:>10.4f} {j20s:>11} {str(pr):>8}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("results", nargs="?", default="results", type=Path)
     ap.add_argument("--check", action="store_true", help="Phase-1 gate only")
+    ap.add_argument("--ablation", action="store_true",
+                    help="summarise ablation runs by varied factor")
     a = ap.parse_args()
 
     runs, by_eps = load(a.results)
+    if a.ablation:
+        print("=" * 68)
+        print("ABLATIONS")
+        print("=" * 68)
+        ablations(runs)
+        return
     ok = check(by_eps, runs)
     if a.check:
         sys.exit(0 if ok else 1)

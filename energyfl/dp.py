@@ -60,6 +60,7 @@ would confound the privacy-utility comparison.
 """
 
 import math
+from functools import lru_cache
 from typing import Optional, Tuple
 
 import torch
@@ -99,6 +100,7 @@ def total_local_steps(
     return max(1, int(round(expected_rounds * local_epochs * spe)))
 
 
+@lru_cache(maxsize=4096)
 def noise_multiplier_for(
     epsilon: float,
     n_examples: int,
@@ -110,9 +112,26 @@ def noise_multiplier_for(
 ) -> float:
     """Invert the RDP accountant: target epsilon -> sigma.
 
-    Called once per client at setup. Because Dirichlet partitions differ in
-    size, sigma differs per client -- correct (each client has its own budget
-    over its own data), but the range must be reported.
+    Because Dirichlet partitions differ in size, sigma differs per client --
+    correct (each client has its own budget over its own data), but the range
+    must be reported.
+
+    CACHED, and the cache is load-bearing for the energy measurement, not a
+    micro-optimisation. get_noise_multiplier binary-searches the accountant,
+    and the search costs far more for a loose budget than a tight one:
+    measured 0.086 s at epsilon=0.5 against 0.693 s at epsilon=8, an 8x
+    spread. In simulation each client is reconstructed every round, so an
+    uncached call ran this search once per client per round inside the
+    energy-measurement window, adding roughly 30 x 0.69 s at epsilon=8 versus
+    30 x 0.086 s at epsilon=0.5. That alone reproduced the entire observed
+    wall-clock trend across epsilon (predicted +18.2 s at epsilon=8 relative
+    to epsilon=0.5, observed +19.7 s) while step counts stayed flat -- an
+    accountant artefact masquerading as a cost of privacy.
+
+    sigma is a pure function of these arguments, so memoising is exact. The
+    first call per (client, epsilon) still lands inside round 1's window;
+    round 1 already carries CUDA warm-up and should be treated as a warm-up
+    round rather than a representative one.
     """
     # Opacus does NOT sample at batch_size/n. DPDataLoader.from_data_loader
     # sets sample_rate = 1/len(loader) = 1/ceil(n/batch_size), so calibrating
