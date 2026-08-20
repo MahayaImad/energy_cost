@@ -263,6 +263,25 @@ def check(by_eps, runs=None) -> bool:
     print("PHASE-1 VERIFICATION")
     print("=" * 68)
 
+    # Completeness first: every later number is a mean over seeds, and a
+    # condition silently short a seed weakens exactly the comparison the
+    # paper rests on. A crashed or still-running sweep looks identical to a
+    # finished one in every other check.
+    counts = {eps: len(g) for eps, g in by_eps.items()}
+    expected = max(counts.values())
+    short = {e: n for e, n in counts.items() if n < expected}
+    print(f"\n[0] Sweep completeness: {sum(counts.values())}/"
+          f"{expected * len(counts)} runs")
+    if short:
+        for e, n in short.items():
+            have = sorted(r["config"]["seed"] for r in by_eps[e])
+            print(f"    eps={e:>5} : {n}/{expected} runs, seeds present {have}  <- INCOMPLETE")
+        print("    FAIL: re-run the sweep to fill these in (run_sweep.sh skips")
+        print("          runs whose JSON already exists), then re-check.")
+        ok = False
+    else:
+        print(f"    ok: all {len(counts)} conditions have {expected} seeds")
+
     dp_walls = {}
     print("\n[1] Wall-clock flatness across epsilon")
     print(f"    {'eps':>6} {'n':>3} {'wall_s':>18} {'wall r>=2':>10} "
