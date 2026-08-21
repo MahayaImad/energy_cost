@@ -648,6 +648,8 @@ def ablations(runs):
     base = {"dirichlet_alpha": 0.5, "num_supernodes": 20, "local_epochs": 1,
             "clipping_norm": 1.0}
 
+    print("\n    'lost' is accuracy given back between the peak and round 30;")
+    print("    'wasted J' is the energy spent getting there.")
     print("\n    (* = single seed: below the ~6% noise floor nothing under")
     print("     roughly 10% is resolvable. Re-run an axis with three seeds")
     print("     before quoting it: SEEDS=\"0 1 2\" AXES=epochs ./run_ablations.sh)")
@@ -658,8 +660,9 @@ def ablations(runs):
         if len(varied) < 2:
             continue
         print(f"\n-- {label} ({field}) --")
-        print(f"    {'value':>8} {'eps':>6} {'n':>3} {'J/round':>10} {'net W':>8} "
-              f"{'final acc':>10} {'J to 0.20':>11} {'peak rd':>8}")
+        print(f"    {'value':>8} {'eps':>6} {'n':>3} {'J/round':>9} "
+              f"{'peak rd':>8} {'peak acc':>9} {'final acc':>10} {'lost':>7} "
+              f"{'wasted J':>9} {'J to 0.20':>11}")
         for v in varied:
             # Hold every other factor at baseline so one thing varies at a time.
             sel = [
@@ -674,14 +677,17 @@ def ablations(runs):
                               key=eps_key):
                 g = [r for r in sel if str(r["config"]["epsilon"]) == eps]
                 jr = np.mean([total_energy(r) / len(r["rounds"]) for r in g])
-                nw = np.mean([total_energy(r, True) / measured_wall(r) for r in g])
-                acc = np.nanmean(rounds_matrix(g, "central_acc")[:, -1])
                 j20, _, n20 = energy_to_target(g, 0.20, net=True)
-                pr, _, _ = peak_round(g)
+                pr, pa, fa = peak_round(g)
                 j20s = "unreached" if n20 == 0 else f"{j20:.0f}"
+                nr = min(len(r["rounds"]) for r in g)
+                # Energy burned after the peak, which buys negative accuracy.
+                wasted = jr * (nr - pr) if pr else 0.0
+                lost = 100 * (pa - fa) / pa if pa else 0.0
                 mark = " *" if len(g) < 2 else ""
-                print(f"    {str(v):>8} {eps:>6} {len(g):>3} {jr:>10.0f} {nw:>8.2f} "
-                      f"{acc:>10.4f} {j20s:>11} {str(pr):>8}{mark}")
+                print(f"    {str(v):>8} {eps:>6} {len(g):>3} {jr:>9.0f} "
+                      f"{str(pr):>8} {pa:>9.4f} {fa:>10.4f} {lost:>6.1f}% "
+                      f"{wasted:>9.0f} {j20s:>11}{mark}")
 
 
 def main():
