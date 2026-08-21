@@ -48,6 +48,14 @@ GRID_GCO2_PER_KWH = {
 
 TARGET_ACCS = (0.15, 0.20, 0.25)
 
+# Carbon is reported per this many training runs. A single run emits well
+# under a gram, which is too small a quantity for a reader to reason about,
+# so the measured figure is scaled linearly. This is the SAME simulated
+# workload repeated, not an extrapolation to real edge hardware -- it stays
+# inside the study's "ratios hold, absolute per-device joules do not"
+# caveat, which scaling to a modelled device fleet would not.
+CARBON_RUNS = 1000
+
 
 # ------------------------------------------------------------------ loading
 
@@ -492,13 +500,28 @@ def tables(by_eps):
         note = "  <-- declines after peak" if fa < pa - 0.005 else ""
         print(f"    {eps:>6} {pr:>11} {pa:>10.4f} {fa:>10.4f} {wasted:>10.0f}{note}")
 
-    print("\n-- Carbon: gCO2eq for one full run, by grid --")
+    print(f"\n-- Carbon: gCO2eq per {CARBON_RUNS} training runs, by grid --")
+    print(f"    (one run is 1/{CARBON_RUNS} of these figures; the same measured")
+    print("     workload repeated, not an extrapolation to other hardware)")
     hdr = "".join(f"{k:>13}" for k in GRID_GCO2_PER_KWH)
     print(f"    {'eps':>6}{hdr}")
     for eps, group in by_eps.items():
-        kwh = np.mean([total_energy(r) for r in group]) / 3.6e6
-        row = "".join(f"{kwh * g:>13.2f}" for g in GRID_GCO2_PER_KWH.values())
+        kwh = np.mean([total_energy(r) for r in group]) / 3.6e6 * CARBON_RUNS
+        row = "".join(f"{kwh * g:>13.1f}" for g in GRID_GCO2_PER_KWH.values())
         print(f"    {eps:>6}{row}")
+
+    base = [g for e, g in by_eps.items() if math.isinf(eps_key(e))]
+    if base:
+        bkwh = np.mean([total_energy(r) for r in base[0]]) / 3.6e6 * CARBON_RUNS
+        print(f"\n    Carbon cost OF PRIVACY (DP minus no-DP), same scale:")
+        print(f"    {'eps':>6}{hdr}")
+        for eps, group in by_eps.items():
+            if math.isinf(eps_key(eps)):
+                continue
+            kwh = np.mean([total_energy(r) for r in group]) / 3.6e6 * CARBON_RUNS
+            row = "".join(f"{(kwh - bkwh) * g:>13.1f}"
+                          for g in GRID_GCO2_PER_KWH.values())
+            print(f"    {eps:>6}{row}")
 
 
 # ------------------------------------------------------------------ figures
@@ -591,11 +614,11 @@ def figures(by_eps, out: Path):
     fig, ax = plt.subplots(figsize=(5.5, 3.6))
     regions = list(GRID_GCO2_PER_KWH)
     for eps in labels:
-        kwh = np.mean([total_energy(r) for r in by_eps[eps]]) / 3.6e6
+        kwh = np.mean([total_energy(r) for r in by_eps[eps]]) / 3.6e6 * CARBON_RUNS
         ax.plot(regions, [kwh * GRID_GCO2_PER_KWH[g] for g in regions], "o-",
                 label=eps_label(eps), ms=4)
-    ax.set_ylabel("gCO$_2$eq per run")
-    ax.set_title("Same workload, same privacy, different grid")
+    ax.set_ylabel(f"gCO$_2$eq per {CARBON_RUNS} runs")
+    ax.set_title("Identical workload, different grid")
     ax.grid(alpha=0.3)
     ax.tick_params(axis="x", labelsize=7)
     ax.legend(fontsize=7, ncol=2)
@@ -625,6 +648,9 @@ def ablations(runs):
     base = {"dirichlet_alpha": 0.5, "num_supernodes": 20, "local_epochs": 1,
             "clipping_norm": 1.0}
 
+    print("\n    (* = single seed: below the ~6% noise floor nothing under")
+    print("     roughly 10% is resolvable. Re-run an axis with three seeds")
+    print("     before quoting it: SEEDS=\"0 1 2\" AXES=epochs ./run_ablations.sh)")
     for field, label in ABLATION_FACTORS.items():
         varied = sorted({r["config"].get(field) for r in runs
                          if r["config"].get(field) is not None})
@@ -632,7 +658,7 @@ def ablations(runs):
         if len(varied) < 2:
             continue
         print(f"\n-- {label} ({field}) --")
-        print(f"    {'value':>8} {'eps':>6} {'J/round':>10} {'net W':>8} "
+        print(f"    {'value':>8} {'eps':>6} {'n':>3} {'J/round':>10} {'net W':>8} "
               f"{'final acc':>10} {'J to 0.20':>11} {'peak rd':>8}")
         for v in varied:
             # Hold every other factor at baseline so one thing varies at a time.
@@ -653,8 +679,9 @@ def ablations(runs):
                 j20, _, n20 = energy_to_target(g, 0.20, net=True)
                 pr, _, _ = peak_round(g)
                 j20s = "unreached" if n20 == 0 else f"{j20:.0f}"
-                print(f"    {str(v):>8} {eps:>6} {jr:>10.0f} {nw:>8.2f} "
-                      f"{acc:>10.4f} {j20s:>11} {str(pr):>8}")
+                mark = " *" if len(g) < 2 else ""
+                print(f"    {str(v):>8} {eps:>6} {len(g):>3} {jr:>10.0f} {nw:>8.2f} "
+                      f"{acc:>10.4f} {j20s:>11} {str(pr):>8}{mark}")
 
 
 def main():
