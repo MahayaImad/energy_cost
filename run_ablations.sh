@@ -14,7 +14,16 @@ set -euo pipefail
 OUT="${OUT:-results_ablation}"
 mkdir -p "$OUT" logs
 GPU_SHARE="${GPU_SHARE:-0.25}"
-SEED=0
+# Seeds per cell. The brief specifies seed 0 only, which is fine for reading
+# a direction, but any cell quoted as a RESULT needs more than one run: the
+# noise floor is ~6%, so a single run cannot separate a real 10% shift from
+# variance. Re-run a specific axis with three seeds before publishing it, e.g.
+#   SEEDS="0 1 2" AXES=epochs ./run_ablations.sh
+SEEDS="${SEEDS:-0}"
+# Which axes to run: any space-separated subset of "alpha clients epochs clip".
+AXES="${AXES:-alpha clients epochs clip}"
+
+has_axis() { [[ " $AXES " == *" $1 "* ]]; }
 
 # Baseline values; each ablation varies exactly one of them.
 BASE_ALPHA=0.5
@@ -28,37 +37,44 @@ EPSILONS=("inf" 1)
 
 run_one() {  # name alpha clients epochs clip eps
   local name="$1" alpha="$2" clients="$3" epochs="$4" clip="$5" eps="$6"
-  local tag="${name}-eps${eps}"
-  if compgen -G "$OUT/run_eps${eps//./p}_seed${SEED}_${tag}.json" > /dev/null; then
-    echo "=== $tag (already present, skipping) ==="
-    return
-  fi
-  echo "=== $tag  alpha=$alpha clients=$clients epochs=$epochs C=$clip ==="
-  flwr run . --stream \
-    --federation-config "num_supernodes=$clients client_resources_num_gpus=$GPU_SHARE init_args_num_gpus=1" \
-    --run-config "seed=$SEED epsilon='$eps' run-id='$tag' results-dir='$OUT' num-supernodes=$clients dirichlet-alpha=$alpha local-epochs=$epochs clipping-norm=$clip" \
-    2>&1 | tee "logs/${tag}.log"
+  local seed tag
+  for seed in $SEEDS; do
+    tag="${name}-s${seed}-eps${eps}"
+    # Also match the pre-multi-seed naming, which carried no seed in the tag,
+    # so an existing single-seed grid is not needlessly re-run.
+    legacy="$OUT/run_eps${eps//./p}_seed${seed}_${name}-eps${eps}.json"
+    if compgen -G "$OUT/run_eps${eps//./p}_seed${seed}_${tag}.json" > /dev/null \
+       || compgen -G "$legacy" > /dev/null; then
+      echo "=== $tag (already present, skipping) ==="
+      continue
+    fi
+    echo "=== $tag  alpha=$alpha clients=$clients epochs=$epochs C=$clip ==="
+    flwr run . --stream \
+      --federation-config "num_supernodes=$clients client_resources_num_gpus=$GPU_SHARE init_args_num_gpus=1" \
+      --run-config "seed=$seed epsilon='$eps' run-id='$tag' results-dir='$OUT' num-supernodes=$clients dirichlet-alpha=$alpha local-epochs=$epochs clipping-norm=$clip" \
+      2>&1 | tee "logs/${tag}.log"
+  done
 }
 
 python prewarm_sigma.py --ablation
 
 for EPS in "${EPSILONS[@]}"; do
   # Partition skew. alpha=0.1 is severely non-IID, 10 is nearly IID.
-  for A in 0.1 0.5 10; do
+  has_axis alpha && for A in 0.1 0.5 10; do
     run_one "alpha$A" "$A" $BASE_CLIENTS $BASE_EPOCHS $BASE_CLIP "$EPS"
   done
   # Federation size. num-supernodes must match the federation's, or the app
   # partitions the data for a different number of clients than exist.
-  for N in 10 20 50; do
+  has_axis clients && for N in 10 20 50; do
     run_one "clients$N" $BASE_ALPHA "$N" $BASE_EPOCHS $BASE_CLIP "$EPS"
   done
   # Local epochs. More local work per round: fewer rounds to converge, but
   # more privacy budget spent per round, so sigma rises to compensate.
-  for E in 1 2 5; do
+  has_axis epochs && for E in 1 2 5; do
     run_one "epochs$E" $BASE_ALPHA $BASE_CLIENTS "$E" $BASE_CLIP "$EPS"
   done
   # Clipping norm. Only meaningful under DP; skipped for the baseline.
-  if [ "$EPS" != "inf" ]; then
+  if [ "$EPS" != "inf" ] && has_axis clip; then
     for C in 0.5 1 2; do
       run_one "clip$C" $BASE_ALPHA $BASE_CLIENTS $BASE_EPOCHS "$C" "$EPS"
     done

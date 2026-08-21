@@ -648,6 +648,9 @@ def ablations(runs):
     base = {"dirichlet_alpha": 0.5, "num_supernodes": 20, "local_epochs": 1,
             "clipping_norm": 1.0}
 
+    print("\n    (* = single seed: below the ~6% noise floor nothing under")
+    print("     roughly 10% is resolvable. Re-run an axis with three seeds")
+    print("     before quoting it: SEEDS=\"0 1 2\" AXES=epochs ./run_ablations.sh)")
     for field, label in ABLATION_FACTORS.items():
         varied = sorted({r["config"].get(field) for r in runs
                          if r["config"].get(field) is not None})
@@ -655,7 +658,7 @@ def ablations(runs):
         if len(varied) < 2:
             continue
         print(f"\n-- {label} ({field}) --")
-        print(f"    {'value':>8} {'eps':>6} {'J/round':>10} {'net W':>8} "
+        print(f"    {'value':>8} {'eps':>6} {'n':>3} {'J/round':>10} {'net W':>8} "
               f"{'final acc':>10} {'J to 0.20':>11} {'peak rd':>8}")
         for v in varied:
             # Hold every other factor at baseline so one thing varies at a time.
@@ -676,8 +679,9 @@ def ablations(runs):
                 j20, _, n20 = energy_to_target(g, 0.20, net=True)
                 pr, _, _ = peak_round(g)
                 j20s = "unreached" if n20 == 0 else f"{j20:.0f}"
-                print(f"    {str(v):>8} {eps:>6} {jr:>10.0f} {nw:>8.2f} "
-                      f"{acc:>10.4f} {j20s:>11} {str(pr):>8}")
+                mark = " *" if len(g) < 2 else ""
+                print(f"    {str(v):>8} {eps:>6} {len(g):>3} {jr:>10.0f} {nw:>8.2f} "
+                      f"{acc:>10.4f} {j20s:>11} {str(pr):>8}{mark}")
 
 
 def main():
