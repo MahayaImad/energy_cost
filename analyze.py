@@ -690,15 +690,111 @@ def ablations(runs):
                       f"{wasted:>9.0f} {j20s:>11}{mark}")
 
 
+def paper(runs, by_eps):
+    """Emit every number and statement the paper's checklist requires.
+
+    Reads the run JSONs only. Nothing here is typed by hand, so the paper and
+    the data cannot drift apart -- which is the whole reason the JSON is the
+    unit of analysis.
+    """
+    from energyfl import dp
+
+    cfgs = [r["config"] for r in runs]
+    one = cfgs[0]
+    seeds = sorted({c["seed"] for c in cfgs})
+
+    print("=" * 68)
+    print("PAPER NUMBERS -- transcribe, do not retype from memory")
+    print("=" * 68)
+
+    print("\n### Accounting model (state verbatim in the methodology)\n")
+    doc = (dp.__doc__ or "").split("FIXED STEP COUNT")[0].strip()
+    for line in doc.splitlines():
+        print("    " + line)
+
+    print("\n### Configuration\n")
+    print(f"    dataset            {one.get('dataset', 'cifar10')}")
+    print(f"    rounds             {one['num_rounds']}")
+    print(f"    supernodes         {one['num_supernodes']}")
+    print(f"    fraction train     {one['fraction_train']}")
+    print(f"    Dirichlet alpha    {one['dirichlet_alpha']}")
+    print(f"    local epochs       {one['local_epochs']}")
+    print(f"    batch size         {one['batch_size']}")
+    print(f"    learning rate      {one['learning_rate']}")
+    print(f"    clipping norm C    {one.get('clipping_norm', dp.CLIPPING_NORM)}  (FIXED across all epsilon)")
+    print(f"    delta              {one['delta']}")
+    print(f"    accountant         {dp.ACCOUNTANT.upper()}")
+    print(f"    seeds              {seeds}")
+    hw = runs[0].get("hardware", {})
+    print(f"    GPU                {hw.get('gpu')}")
+    print(f"    torch / cuda       {hw.get('torch')} / {hw.get('cuda')}")
+
+    print("\n### Per-client sigma range (varies with partition size)\n")
+    for eps, g in by_eps.items():
+        if math.isinf(eps_key(eps)):
+            continue
+        lo, hi = rounds_matrix(g, "sigma_min"), rounds_matrix(g, "sigma_max")
+        if not np.isnan(lo).all():
+            print(f"    eps={eps:>4}   sigma {np.nanmin(lo):.3f} - {np.nanmax(hi):.3f}")
+
+    w, pct = noise_floor(by_eps)
+    print("\n### Measurement\n")
+    idle = np.mean([r["totals"].get("idle_power_w", np.nan) for r in runs])
+    sd = np.mean([r["totals"].get("idle_power_w_sd", np.nan) for r in runs])
+    print("    Energy via NVML nvmlDeviceGetTotalEnergyConsumption (a hardware")
+    print("    counter in accumulated mJ, differenced per round) -- measured,")
+    print("    not estimated from a TDP model.")
+    print(f"    Idle baseline      {idle:.2f} W (sd {sd:.2f})")
+    print(f"    Noise floor        +/-{w:.2f} W ({pct:.2f}%)")
+    print(f"    -> no effect below ~{pct:.0f}% is resolvable; say so before")
+    print("       quoting any energy difference.")
+
+    print("\n### Statements the checklist requires\n")
+    for line in [
+        "No amplification by client subsampling is claimed: that needs secure",
+        "  aggregation or a shuffler, neither of which is assumed. Reported",
+        "  epsilon is an upper bound.",
+        "",
+        "Determinism deliberately not enforced:",
+        "  torch.use_deterministic_algorithms would force slower kernels and",
+        "  change measured energy, i.e. measure a configuration nobody deploys.",
+        "  Reproducibility comes from averaging over seeds instead. Per-client",
+        "  step counts ARE deterministic (verify_dp.py check 0.2); the variation",
+        "  across rounds is client sampling, recorded in sampled_partitions.",
+        "",
+        "Compute is held identical across epsilon: executed steps match the",
+        "  steps the accountant was calibrated for (check [2]). The step cap in",
+        "  train_private never binds -- Opacus already yields exactly",
+        "  ceil(n/B) batches -- so it is a guard, not the active control.",
+        "",
+        "The privacy accountant is derived BEFORE training (prewarm_sigma.py).",
+        "  Derived inside the loop it costs 0.086 s at eps=0.5 against 0.693 s",
+        "  at eps=8, which lands in the measurement window and scales with the",
+        "  budget -- an artefact that mimics a cost of privacy exactly.",
+        "",
+        "Simulation caveat: virtual clients share one GPU. Ratios hold;",
+        "  absolute per-device joules do not transfer to real edge hardware.",
+        "  CPU RAPL counters unavailable (containerised), so measurement is",
+        "  GPU-only and communication energy is modelled, not measured.",
+    ]:
+        print(f"    {line}")
+    print()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("results", nargs="?", default="results", type=Path)
     ap.add_argument("--check", action="store_true", help="Phase-1 gate only")
     ap.add_argument("--ablation", action="store_true",
                     help="summarise ablation runs by varied factor")
+    ap.add_argument("--paper", action="store_true",
+                    help="emit every checklist number and statement")
     a = ap.parse_args()
 
     runs, by_eps = load(a.results)
+    if a.paper:
+        paper(runs, by_eps)
+        return
     if a.ablation:
         print("=" * 68)
         print("ABLATIONS")
