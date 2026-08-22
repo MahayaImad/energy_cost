@@ -1,0 +1,160 @@
+% Section III -- Methodology.
+% Numbers here come from `python analyze.py results/ --paper` on the 18-run
+% sweep (6 epsilon x 3 seeds). If a run is added or a control changes,
+% regenerate that output and update this file rather than editing by hand.
+% One figure is left to verify against this sweep -- see the VERIFY comment
+% in the Energy Measurement subsection.
+% Citation keys are placeholders: \cite{opacus}, \cite{flower}, \cite{rdp},
+% \cite{dpsgd}, \cite{dirichlet}, \cite{nvml}.
+
+\section{Methodology}
+
+\subsection{Federated Setup}
+
+We train a five-layer convolutional network (0.24~MB) on CIFAR-10 across 20
+simulated clients using the Flower framework~\cite{flower}. Each round samples
+50\% of clients for training and 50\% for evaluation. Client data is
+partitioned by a Dirichlet distribution over labels with $\alpha=0.5$, the
+standard non-IID setting~\cite{dirichlet}; partition sizes therefore differ
+between clients, which matters for privacy accounting below. Clients perform
+one local epoch of SGD per round (batch size 32, learning rate 0.01, momentum
+0.9) and the server aggregates by FedAvg over 30 rounds. Every configuration
+is repeated with three seeds.
+
+\subsection{Privacy Accounting}
+
+We enforce \emph{client-level local differential privacy}: each client holds
+its own $(\varepsilon,\delta)$ budget over the entire federated run, and the
+server is untrusted.
+
+The budget is accounted over all local SGD steps a client takes across all
+rounds in which it participates --- not per round, and not per local epoch.
+For a client with $n$ local training examples, batch size $B$, $R$ rounds,
+client sampling fraction $q_c$ and $E$ local epochs:
+%
+\begin{align}
+  s_{\text{epoch}} &= \lceil n / B \rceil \\
+  s_{\text{total}} &= R \, q_c \, E \, s_{\text{epoch}}
+\end{align}
+%
+We invert the RDP accountant~\cite{rdp} once, before training starts, to find
+the noise multiplier $\sigma$ that yields the target $\varepsilon$ at $\delta$
+after $s_{\text{total}}$ steps, and hold $\sigma$ constant for the run.
+
+Precomputation is deliberate. In simulation each client object is
+reconstructed every round, so an engine-internal accountant resets each round
+and reports a per-round $\varepsilon$ while the true budget compounds ---
+understating the privacy loss by roughly a factor of the round count.
+
+Two properties of the sampling deserve statement. First, Opacus'
+\texttt{DPDataLoader} samples at rate $1/\lceil n/B \rceil$ rather than $B/n$;
+we calibrate at the rate the sampler actually uses, so the realised
+$\varepsilon$ matches the target to within the accountant's search tolerance
+rather than being conservative by an unstated margin. Second, we claim
+\textbf{no privacy amplification by client subsampling}: amplification
+requires secure aggregation or a shuffler, neither of which we assume. The
+reported $\varepsilon$ is therefore an upper bound.
+
+Because Dirichlet partitions differ in size, $\sigma$ differs per client.
+Table~\ref{tab:sigma} reports the observed range.
+
+\begin{table}[t]
+\caption{Per-client noise multiplier, 30 rounds, $\delta=10^{-5}$}
+\label{tab:sigma}
+\centering
+\begin{tabular}{lcc}
+\hline
+$\varepsilon$ & $\sigma_{\min}$ & $\sigma_{\max}$ \\
+\hline
+0.5 & 2.773 & 6.094 \\
+1   & 1.592 & 3.320 \\
+2   & 1.038 & 1.899 \\
+4   & 0.781 & 1.204 \\
+8   & 0.621 & 0.853 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Energy Measurement}
+
+Energy is read from the NVML hardware counter
+\texttt{nvmlDeviceGetTotalEnergyConsumption}~\cite{nvml}, which accumulates
+millijoules on the device. We difference the counter before and after each
+round, so the measurement involves no power sampling and no numerical
+integration, and cannot miss a transient. This is a measured quantity, not a
+TDP-based estimate.
+
+Measurement is server-side and per round, bracketing \texttt{configure\_train}
+through \texttt{aggregate\_evaluate}. In simulation all clients share one GPU,
+so a round-level window captures the full cost regardless of how the runtime
+schedules client actors; measuring inside each client would double-count
+concurrent work.
+
+We report energy both gross and net of an idle baseline. The baseline is
+sampled over a quiet-GPU window before each run: $18.54$~W (sd $0.10$) on our
+hardware. Net energy subtracts this baseline over the wall-clock the counter
+actually covers, which is \emph{not} whole-process wall-clock --- run
+start-up, centralised evaluation between rounds, and teardown fall outside the
+round windows. Subtracting idle over the longer interval would understate net
+compute energy substantially.% VERIFY the exact fraction on this sweep:
+% python -c "import json,glob;rs=[json.load(open(p)) for p in glob.glob('results/run_*.json')];
+%   print(sum(1-r['totals']['wall_s_measured']/r['totals']['wall_s_total'] for r in rs)/len(rs))"
+% then state it: "...and account for roughly N% of process wall-clock."
+
+Repeating each configuration across three seeds gives a measurement noise
+floor of $\pm 4.38$~W ($6.38\%$). We report no effect smaller than this as an
+effect.
+
+\subsection{Experimental Controls}
+
+\textbf{Fixed clipping norm.} $C=1.0$ for every $\varepsilon$. Tuning $C$ per
+budget would confound the privacy--utility comparison. Our ablation shows
+$C$ affects convergence substantially while leaving per-round energy
+unchanged, so $C=1.0$ is a conservative rather than optimal choice.
+
+\textbf{Identical compute across budgets.} The energy axis is only
+interpretable if every $\varepsilon$ condition executes the same workload. We
+verify per round that executed optimiser steps match the steps the accountant
+was calibrated for. Opacus' loader yields exactly $\lceil n/B \rceil$ batches
+per epoch, so step counts are deterministic and independent of
+$\varepsilon$; Poisson sampling randomises batch \emph{size} (approximately
+$\pm 2\%$ of $n$), not step count, and that residual is unbiased with respect
+to $\varepsilon$. Across the sweep, executed and calibrated steps agree to
+within one step per round ($0.16\%$), a floating-point artefact of the
+loader's batch-count computation that runs \emph{fewer} steps than accounted,
+preserving the upper-bound claim.
+
+\textbf{Accountant excluded from the measurement window.} Deriving $\sigma$
+requires a binary search over the RDP accountant whose cost depends strongly
+on the target budget: we measure $0.086$~s at $\varepsilon=0.5$ against
+$0.693$~s at $\varepsilon=8$. Executed inside the federated loop, this cost
+falls within the energy-measurement window and scales with $\varepsilon$,
+producing a wall-clock trend that is indistinguishable in shape from a cost of
+privacy. In our first clean sweep it accounted for the entire measured
+$\varepsilon$ trend (predicted $+18.2$~s at $\varepsilon=8$ relative to
+$\varepsilon=0.5$; measured $+19.7$~s) while step counts stayed flat. We
+therefore derive all $\sigma$ values before measurement begins. We flag this
+as a general hazard for energy studies of privacy mechanisms.
+
+\textbf{Randomised run order.} Sweeping $\varepsilon$ in a fixed order makes
+execution order and $\varepsilon$ rank-correlated ($\rho=-0.99$), so any drift
+over a sweep is inseparable from a privacy effect. We randomise the order of
+all 18 runs, reducing the correlation to $\rho=-0.20$ and making the
+$\varepsilon$ trend attributable.
+
+\textbf{Determinism deliberately not enforced.} We do not enable
+\texttt{torch.use\_deterministic\_algorithms}: it forces slower kernel
+selection and would change measured energy, i.e.\ we would be measuring a
+configuration nobody deploys. Reproducibility comes from averaging over seeds.
+Per-client step counts are deterministic; the round-to-round variation in
+aggregate step count comes from client sampling, which we record per round.
+
+\subsection{Limitations}
+
+Clients are virtual and share a single GPU rather than running on distinct
+devices. Relative comparisons between privacy budgets hold; absolute
+per-device joules do not transfer to real edge hardware. CPU RAPL counters
+were unavailable in our containerised environment, so measurement is GPU-only
+and communication energy is modelled analytically rather than measured. The
+workload does not saturate the device (roughly 68~W on a 360~W card), which is
+why idle-subtracted figures are reported alongside gross ones.
