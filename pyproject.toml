@@ -59,6 +59,12 @@ clientapp = "energyfl.client_app:app"
 
 [tool.flwr.app.config]
 seed = 0
+# "cifar10" or "har". HAR clients are individual study participants, so
+# num-supernodes must equal the participant count of the chosen split:
+# 21 for "official" (the 9 test participants are held out entirely) or
+# 30 for "all".
+dataset = "cifar10"
+har-split = "official"
 epsilon = "inf"
 run-id = ""
 num-server-rounds = 30

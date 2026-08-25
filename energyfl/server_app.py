@@ -21,7 +21,7 @@ from flwr.serverapp.strategy import FedAvg
 
 from energyfl import energy
 from energyfl.task import (
-    Net,
+    build_model,
     get_device,
     load_centralized_testset,
     set_seed,
@@ -175,7 +175,8 @@ class EnergyFedAvg(FedAvg):
         return out
 
 
-def make_global_evaluate(seed: int, store: dict):
+def make_global_evaluate(seed: int, store: dict, dataset: str = "cifar10",
+                        har_split: str = "official"):
     """Server-side evaluation on the held-out CIFAR-10 test split.
 
     Results are stashed in `store` as well as returned: the strategy calls
@@ -184,10 +185,14 @@ def make_global_evaluate(seed: int, store: dict):
     """
 
     def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
-        model = Net()
+        model = build_model(dataset)
         model.load_state_dict(arrays.to_torch_state_dict())
         device = get_device()
-        loss, acc = test_fn(model, load_centralized_testset(), device)
+        loss, acc = test_fn(
+            model,
+            load_centralized_testset(dataset=dataset, har_split=har_split),
+            device,
+        )
         store[server_round] = {"central_loss": loss, "central_acc": acc}
         return MetricRecord({"central_loss": loss, "central_acc": acc})
 
@@ -206,7 +211,9 @@ def main(grid: Grid, context: Context) -> None:
             "NVML total-energy counter unavailable; results would be estimates."
         )
 
-    global_model = Net()
+    dataset = str(cfg.get("dataset", "cifar10"))
+    har_split = str(cfg.get("har-split", "official"))
+    global_model = build_model(dataset)
     arrays = ArrayRecord(global_model.state_dict())
 
     strategy = EnergyFedAvg(
@@ -234,7 +241,7 @@ def main(grid: Grid, context: Context) -> None:
         initial_arrays=arrays,
         train_config=ConfigRecord({"lr": float(cfg["learning-rate"])}),
         num_rounds=int(cfg["num-server-rounds"]),
-        evaluate_fn=make_global_evaluate(seed, central),
+        evaluate_fn=make_global_evaluate(seed, central, dataset, har_split),
     )
 
     # Central evaluation happens after the round record is appended, so fold
@@ -259,7 +266,8 @@ def main(grid: Grid, context: Context) -> None:
             "epsilon": cfg.get("epsilon", "inf"),  # "inf" = no-DP baseline
             "delta": 1e-5,
             "seed": seed,
-            "dataset": "cifar10",
+            "dataset": dataset,
+            "har_split": har_split if dataset.lower().startswith("har") else None,
             "num_rounds": int(cfg["num-server-rounds"]),
             "num_supernodes": int(cfg["num-supernodes"]),
             "fraction_train": float(cfg["fraction-train"]),

@@ -1,0 +1,48 @@
+% Figure environments. The PNGs are written by `python analyze.py results/`
+% into results/; copy them next to the .tex or adjust \graphicspath.
+% Place each figure near its first reference in Section IV.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig1_convergence.png}
+\caption{Central test accuracy against communication round for each privacy
+budget, means over three seeds with $\pm 1$ SD bands. Markers indicate the
+energy-optimal stopping round for conditions whose accuracy declines after its
+peak. Tighter budgets peak earlier and lower; at $\varepsilon \le 2$ the curve
+falls once accumulated noise dominates the aggregated update.}
+\label{fig:convergence}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig2_energy_to_target.png}
+\caption{Energy required to reach each target accuracy, net of the idle
+baseline. Bars marked \emph{unreached} denote configurations that never attain
+the target within the 30-round budget, which is a result rather than missing
+data. The spread across budgets is far wider than the per-round overhead of
+Fig.~\ref{fig:perround}, because the cost of a tight budget is paid in extra
+rounds.}
+\label{fig:energytarget}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig3_energy_per_round.png}
+\caption{Energy per round by privacy budget, with the non-private baseline in
+grey. The private conditions are flat within the $6.38\%$ measurement noise
+floor and sit a fixed step above the baseline. This separates the two
+mechanisms: the step is an implementation overhead independent of
+$\varepsilon$, so every budget-dependent cost acts through the round count.}
+\label{fig:perround}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig4_carbon.png}
+\caption{Emissions for 1000 training runs of the identical workload across
+grid carbon intensities. The vertical distance between a private curve and the
+non-private one is the carbon attributable to privacy: $228$~gCO$_2$eq on
+Algeria's gas-dominated grid against $12$~g in Norway, a factor of $18.8$ for
+the same computation and the same guarantee.}
+\label{fig:carbon}
+\end{figure}

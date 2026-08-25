@@ -1,0 +1,200 @@
+% Section IV -- Results.
+% Every number comes from `python analyze.py results/` on the 18-run sweep
+% (6 epsilon x 3 seeds) and `python analyze.py results_ablation/ --ablation`.
+% Regenerate those and update this file rather than editing values by hand.
+% Cells marked n=1 in the ablation output are NOT quoted here.
+
+\section{Results}
+
+All figures below are means over three seeds. The measurement noise floor,
+computed from the across-seed spread within each condition, is $\pm 4.38$~W
+($6.38\%$); we treat no difference smaller than this as resolvable.
+
+\subsection{The Per-Round Cost of Privacy Is Fixed}
+
+Table~\ref{tab:perround} gives energy per round for each budget. Net of the
+idle baseline, differentially private training costs $121$~J per round on
+average against $75.8$~J without privacy, an overhead of $+60\%$. Across the
+five private conditions the per-round figure varies by $9.6\%$ of its mean,
+against the $6.38\%$ noise floor, so within the resolution of the instrument
+the per-round cost does not depend on $\varepsilon$.
+
+This separates the two mechanisms by which privacy consumes energy. The
+per-round overhead is an implementation cost --- per-sample gradient
+computation and clipping --- and is paid identically whether the budget is
+tight or loose. Everything that depends on $\varepsilon$ must therefore act
+through the number of rounds, which is what the remaining results measure.
+
+The engineering implications differ. A fixed overhead is addressed by
+optimising the DP implementation; a convergence penalty is addressed by
+changing the round budget or the stopping rule. Reporting only energy per
+round would show privacy costing a flat $60\%$ and would miss the larger
+effect entirely.
+
+\begin{table}[t]
+\caption{Energy per round, means over three seeds}
+\label{tab:perround}
+\centering
+\begin{tabular}{lrrrr}
+\hline
+$\varepsilon$ & Gross (W) & Net (W) & Gross (J) & Net (J) \\
+\hline
+0.5      & 68.66 & 50.18 & 168 & 122.9 \\
+1        & 66.42 & 48.26 & 159 & 115.8 \\
+2        & 69.75 & 51.12 & 167 & 122.1 \\
+4        & 70.54 & 51.26 & 175 & 127.5 \\
+8        & 66.51 & 47.92 & 163 & 117.1 \\
+$\infty$ & 58.09 & 39.96 & 110 &  75.8 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Energy to Target Accuracy}
+
+Energy per round makes privacy look cheap. The quantity that matters to a
+battery-powered deployment is the energy required to reach a usable model,
+and Table~\ref{tab:target} reports it.
+
+At a target of $0.20$ central accuracy, $\varepsilon=1$ requires $1482$~J
+(net) against $406$~J without privacy: \textbf{$3.65\times$ the energy for the
+same accuracy}. The gap is nearly three times the $+60\%$ per-round overhead,
+because the private run needs $11.7$ rounds where the non-private run needs
+$2.3$. At $\varepsilon=0.5$ the target is never reached within the 30-round
+budget at all.
+
+Unreachability is itself a result. A deployment that fixes both a privacy
+budget and a round budget may be unable to produce a model of the required
+quality at any energy expenditure, and no amount of additional training within
+that budget will change this. We therefore report unreached targets explicitly
+rather than omitting those configurations.
+
+The $0.15$ target is reached by every condition within four to six rounds,
+where the accuracy curves are still steep and the ordering across $\varepsilon$
+is not stable across seeds. We do not draw conclusions from it.
+
+\begin{table}[t]
+\caption{Energy to reach a target accuracy (J, net of idle). ``---'' marks
+targets not reached within 30 rounds}
+\label{tab:target}
+\centering
+\begin{tabular}{lrrrr}
+\hline
+$\varepsilon$ & 0.20 & rounds & 0.25 & rounds \\
+\hline
+0.5      & ---  & ---  & ---  & ---  \\
+1        & 1482 & 11.7 & ---  & ---  \\
+2        & 1295 &  9.3 & 1996 & 15.7 \\
+4        & 1313 &  8.0 & 2047 & 14.3 \\
+8        & 1149 &  8.3 & 1579 & 12.3 \\
+$\infty$ &  406 &  2.3 &  545 &  4.3 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{An Energy-Optimal Stopping Round}
+
+Under a tight budget the accuracy curve peaks and then declines
+(Fig.~\ref{fig:convergence}). Table~\ref{tab:stopping} locates the peak for
+each condition. The peak round increases monotonically with the privacy
+budget: round 7 at $\varepsilon=0.5$, then 11, 19, 24, and no peak before
+round 30 at $\varepsilon=8$.
+
+Past that round, training consumes energy and loses accuracy at the same time.
+At $\varepsilon=0.5$ the model reaches $0.169$ at round 7 and ends at $0.161$;
+the 23 rounds that follow account for $3866$~J, or $77\%$ of the run's total
+energy, and return nothing. The mechanism is that accumulated noise comes to
+dominate the aggregated signal once the per-round update carries less
+information than the noise added to protect it.
+
+This gives a concrete rule: under local DP the round budget should be chosen
+from the privacy budget, and training past the resulting round is doubly
+wasteful. Standard practice of training for a fixed round count regardless of
+$\varepsilon$ both burns energy and degrades the model.
+
+\begin{table}[t]
+\caption{Energy-optimal stopping. ``Wasted'' is energy spent after the peak}
+\label{tab:stopping}
+\centering
+\begin{tabular}{lrrrr}
+\hline
+$\varepsilon$ & Peak round & Peak acc. & Final acc. & Wasted (J) \\
+\hline
+0.5      &  7 & 0.169 & 0.161 & 3866 \\
+1        & 11 & 0.207 & 0.187 & 3029 \\
+2        & 19 & 0.260 & 0.235 & 1833 \\
+4        & 24 & 0.291 & 0.288 & 1052 \\
+8        & 30 & 0.308 & 0.308 &    0 \\
+$\infty$ & 30 & 0.503 & 0.503 &    0 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Ablations}
+
+We vary one factor at a time at $\varepsilon \in \{1, \infty\}$, holding the
+others at the configuration of Section~III. Results are means over three
+seeds.
+
+\textbf{Local epochs invert under privacy.} Increasing local work per round is
+the standard way to reduce communication rounds in federated learning. Without
+privacy it is close to accuracy-neutral here ($0.514$, $0.552$, $0.525$ for
+one, two and five local epochs) while raising energy per round by $3.5\times$.
+Under $\varepsilon=1$ it is harmful on both axes: accuracy falls from $0.181$
+to $0.129$ to $0.101$, the peak round collapses from 13 to 6 to 3, and energy
+per round rises from $164$~J to $585$~J. The accounting model explains this
+directly: local steps enter $s_{\text{total}}$, so additional local epochs
+consume budget faster and force a larger $\sigma$ for the same
+$\varepsilon$. The two costs compound, since a configuration that spends more
+per round also reaches its own peak sooner.
+
+\textbf{Clipping norm trades accuracy against target.} At $\varepsilon=1$,
+energy per round is unchanged by $C$ ($167$, $164$, $165$~J for $C \in
+\{0.5, 1, 2\}$, well within the noise floor), so $C$ acts purely on
+convergence. Tighter clipping gives higher final accuracy ($0.206$ against
+$0.117$ at $C=2$) and a later peak (round 18 against 6). The cheapest route to
+a \emph{low} target is loose clipping --- $C=2$ reaches $0.20$ in $940$~J
+against $1725$~J at $C=0.5$ --- but it then collapses, so that figure is only
+meaningful together with the stopping round. The optimal clipping norm depends
+on the accuracy target, and our fixed $C=1.0$ is a conservative choice rather
+than an optimal one.
+
+\textbf{Heterogeneity is masked by noise.} Without privacy, partition skew
+behaves as expected: accuracy $0.397$, $0.509$, $0.547$ for $\alpha \in \{0.1,
+0.5, 10\}$, and reaching $0.20$ costs $1.5\times$ more energy at $\alpha=0.1$
+than at $\alpha=10$. Under $\varepsilon=1$ the ordering is not stable across
+seeds, which we read as DP noise dominating the effect of heterogeneity rather
+than as evidence of a direction.
+
+\subsection{Carbon Cost by Grid}
+
+Identical workloads emit different amounts of CO$_2$ depending on where they
+run. Table~\ref{tab:carbon} scales the measured energy to 1000 training runs
+and applies published grid carbon intensities. The scaling is a repetition of
+the measured workload, not an extrapolation to different hardware.
+
+The cost attributable to privacy --- the difference between private and
+non-private training --- is $228$~gCO$_2$eq per 1000 runs on Algeria's
+gas-dominated grid against $12$~g in Norway, a factor of $18.8$ for the same
+computation and the same privacy guarantee. Choosing a privacy budget is
+therefore in part a geographic decision: the carbon a given $\varepsilon$ costs
+depends on where the training happens, and identical privacy requirements
+carry very different environmental prices across deployment regions.
+
+\begin{table}[t]
+\caption{gCO$_2$eq per 1000 training runs. ``Privacy'' is the private minus
+non-private difference}
+\label{tab:carbon}
+\centering
+\begin{tabular}{lrrr}
+\hline
+Grid & DP & No DP & Privacy \\
+\hline
+Norway  &  36 &  24 &  12 \\
+France  &  78 &  51 &  26 \\
+Germany & 477 & 316 & 161 \\
+USA     & 512 & 339 & 173 \\
+Algeria & 677 & 448 & 228 \\
+India   & 875 & 580 & 295 \\
+\hline
+\end{tabular}
+\end{table}

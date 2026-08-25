@@ -46,7 +46,17 @@ GRID_GCO2_PER_KWH = {
     "India": 631,
 }
 
-TARGET_ACCS = (0.15, 0.20, 0.25)
+# Target accuracies are dataset-specific: what counts as a usable model on a
+# 10-class image benchmark and on a 6-class activity task are different
+# numbers. Targets must be chosen from what the setup can actually reach --
+# a target no configuration attains is reported as unreached, which is itself
+# a result, but a whole column of unreached rows tells the reader nothing.
+# Override with --targets when the achievable range turns out different.
+TARGET_ACCS_BY_DATASET = {
+    "cifar10": (0.15, 0.20, 0.25),
+    "har": (0.50, 0.70, 0.85),
+}
+TARGET_ACCS = TARGET_ACCS_BY_DATASET["cifar10"]
 
 # Carbon is reported per this many training runs. A single run emits well
 # under a gram, which is too small a quantity for a reader to reason about,
@@ -662,7 +672,7 @@ def ablations(runs):
         print(f"\n-- {label} ({field}) --")
         print(f"    {'value':>8} {'eps':>6} {'n':>3} {'J/round':>9} "
               f"{'peak rd':>8} {'peak acc':>9} {'final acc':>10} {'lost':>7} "
-              f"{'wasted J':>9} {'J to 0.20':>11}")
+              f"{'wasted J':>9} {f'J to {TARGET_ACCS[len(TARGET_ACCS)//2]:.2f}':>11}")
         for v in varied:
             # Hold every other factor at baseline so one thing varies at a time.
             sel = [
@@ -677,7 +687,8 @@ def ablations(runs):
                               key=eps_key):
                 g = [r for r in sel if str(r["config"]["epsilon"]) == eps]
                 jr = np.mean([total_energy(r) / len(r["rounds"]) for r in g])
-                j20, _, n20 = energy_to_target(g, 0.20, net=True)
+                tgt = TARGET_ACCS[len(TARGET_ACCS) // 2]
+                j20, _, n20 = energy_to_target(g, tgt, net=True)
                 pr, pa, fa = peak_round(g)
                 j20s = "unreached" if n20 == 0 else f"{j20:.0f}"
                 nr = min(len(r["rounds"]) for r in g)
@@ -789,9 +800,26 @@ def main():
                     help="summarise ablation runs by varied factor")
     ap.add_argument("--paper", action="store_true",
                     help="emit every checklist number and statement")
+    ap.add_argument("--targets", default=None,
+                    help="comma-separated target accuracies, e.g. 0.5,0.7,0.85")
     a = ap.parse_args()
 
     runs, by_eps = load(a.results)
+
+    global TARGET_ACCS
+    names = {str(r["config"].get("dataset", "cifar10")).lower() for r in runs}
+    if len(names) > 1:
+        sys.exit(
+            f"results directory mixes datasets {sorted(names)}; energy and "
+            "accuracy are not comparable across them. Keep one per directory."
+        )
+    name = names.pop()
+    if a.targets:
+        TARGET_ACCS = tuple(float(x) for x in a.targets.split(","))
+    else:
+        TARGET_ACCS = TARGET_ACCS_BY_DATASET.get(name, TARGET_ACCS)
+    print(f"dataset: {name}   targets: {TARGET_ACCS}\n")
+
     if a.paper:
         paper(runs, by_eps)
         return
