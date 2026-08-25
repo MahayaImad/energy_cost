@@ -31,9 +31,22 @@ EOF
 EPSILONS=("inf" 8 4 2 1 0.5)
 SEEDS=(0 1 2)
 GPU_SHARE="${GPU_SHARE:-0.25}"
+
+# DATASET=har ./run_sweep.sh runs the HAR sweep into results_har/.
+DATASET="${DATASET:-cifar10}"
+HAR_SPLIT="${HAR_SPLIT:-official}"
 # Must match num-supernodes in [tool.flwr.app.config]: one is what the
 # federation spawns, the other is what the app partitions the data for.
-NUM_SUPERNODES=20
+# On HAR a client IS a study participant, so the count is fixed by the split:
+# 21 for the published subject-disjoint split, 30 if all participants are used.
+if [ "$DATASET" = "har" ]; then
+  [ "$HAR_SPLIT" = "official" ] && NUM_SUPERNODES=21 || NUM_SUPERNODES=30
+  OUT="${OUT:-results_har}"
+else
+  NUM_SUPERNODES=20
+  OUT="${OUT:-results}"
+fi
+mkdir -p "$OUT"
 FEDCFG="num_supernodes=$NUM_SUPERNODES client_resources_num_gpus=$GPU_SHARE init_args_num_gpus=1"
 
 # Randomised run order. Sweeping epsilon in a fixed descending order makes
@@ -61,24 +74,28 @@ echo
 
 # Derive every sigma before any measurement starts, so the accountant's
 # binary search never runs inside a measured round. Cheap, and idempotent.
-python prewarm_sigma.py
+if [ "$DATASET" = "har" ]; then
+  python prewarm_sigma.py --dataset har --har-split "$HAR_SPLIT"
+else
+  python prewarm_sigma.py
+fi
 
 for PAIR in "${PAIRS[@]}"; do
   read -r EPS SEED <<< "$PAIR"
   {
     TAG="eps${EPS}-s${SEED}"
-    if compgen -G "results/run_eps${EPS//./p}_seed${SEED}_${TAG}.json" > /dev/null; then
+    if compgen -G "$OUT/run_eps${EPS//./p}_seed${SEED}_${TAG}.json" > /dev/null; then
       echo "=== $TAG (already present, skipping) ==="
       continue
     fi
     echo "=== $TAG ==="
     flwr run . --stream \
       --federation-config "$FEDCFG" \
-      --run-config "seed=$SEED epsilon='$EPS' run-id='$TAG'" \
+      --run-config "seed=$SEED epsilon='$EPS' run-id='$TAG' dataset='$DATASET' har-split='$HAR_SPLIT' num-supernodes=$NUM_SUPERNODES results-dir='$OUT'" \
       2>&1 | tee "logs/${TAG}.log"
   }
 done
 
 echo
 echo "=== Phase 1 verification ==="
-python analyze.py results/ --check
+python analyze.py "$OUT" --check

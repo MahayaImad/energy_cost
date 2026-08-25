@@ -27,9 +27,6 @@ import argparse
 import json
 from pathlib import Path
 
-from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import DirichletPartitioner
-
 from energyfl import dp
 
 DATASET = "uoft-cs/cifar10"
@@ -43,6 +40,9 @@ def partition_sizes(num_partitions: int, alpha: float, seed: int):
 
     Mirrors task.load_partition: same partitioner arguments, same split.
     """
+    from flwr_datasets import FederatedDataset          # CIFAR-only dependency
+    from flwr_datasets.partitioner import DirichletPartitioner
+
     partitioner = DirichletPartitioner(
         num_partitions=num_partitions,
         partition_by="label",
@@ -59,8 +59,27 @@ def partition_sizes(num_partitions: int, alpha: float, seed: int):
     return sizes
 
 
+def har_partition_sizes(num_partitions: int, split: str):
+    """Local train-set size per participant, exactly as the ClientApp sees it.
+
+    Delegates to the same loader the clients use, so the sizes cannot drift
+    apart from the ones sigma is calibrated against. The subject partition is
+    deterministic, so unlike CIFAR it does not depend on the seed.
+    """
+    from energyfl.task import load_partition
+
+    sizes = []
+    for pid in range(num_partitions):
+        tl, _ = load_partition(pid, num_partitions, BATCH, 0.5, 0,
+                               dataset="har", har_split=split)
+        sizes.append(len(tl.dataset))
+    return sizes
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--dataset", default="cifar10", choices=["cifar10", "har"])
+    ap.add_argument("--har-split", default="official", choices=["official", "all"])
     ap.add_argument("--ablation", action="store_true",
                     help="also cover the ablation grid (alpha, clients, epochs)")
     ap.add_argument("--out", type=Path, default=dp.SIGMA_CACHE_PATH)
@@ -68,10 +87,14 @@ def main():
 
     # (num_partitions, alpha, local_epochs) combinations to cover.
     combos = [(20, 0.5, 1)]
+    if a.dataset == "har":
+        combos = [(21 if a.har_split == "official" else 30, 0.5, 1)]
     if a.ablation:
-        combos += [(20, 0.1, 1), (20, 10.0, 1),
-                   (10, 0.5, 1), (50, 0.5, 1),
-                   (20, 0.5, 2), (20, 0.5, 5)]
+        extra = [(20, 0.5, 2), (20, 0.5, 5)]
+        if a.dataset == "cifar10":
+            extra += [(20, 0.1, 1), (20, 10.0, 1), (10, 0.5, 1), (50, 0.5, 1)]
+        combos += [(c[0] if a.dataset == "cifar10" else combos[0][0], c[1], c[2])
+                   for c in extra]
 
     cache = {}
     if a.out.exists():
@@ -82,10 +105,18 @@ def main():
             pass
 
     for clients, alpha, epochs in combos:
-        for seed in SEEDS:
-            sizes = partition_sizes(clients, alpha, seed)
-            print(f"\nclients={clients} alpha={alpha} epochs={epochs} seed={seed}: "
-                  f"n = {min(sizes)}..{max(sizes)}")
+        # The HAR partition is by participant and therefore seed-independent,
+        # so one pass covers every seed.
+        seeds = SEEDS if a.dataset == "cifar10" else [0]
+        for seed in seeds:
+            if a.dataset == "har":
+                sizes = har_partition_sizes(clients, a.har_split)
+            else:
+                sizes = partition_sizes(clients, alpha, seed)
+            label = (f"clients={clients} split={a.har_split} epochs={epochs}"
+                     if a.dataset == "har"
+                     else f"clients={clients} alpha={alpha} epochs={epochs} seed={seed}")
+            print(f"\n{label}: n = {min(sizes)}..{max(sizes)}")
             for eps in EPSILONS:
                 sig = []
                 for n in sizes:

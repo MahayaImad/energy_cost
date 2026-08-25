@@ -5,7 +5,7 @@ from flwr.clientapp import ClientApp
 
 from energyfl import dp
 from energyfl.task import (
-    Net,
+    build_model,
     get_device,
     load_partition,
     set_seed,
@@ -29,6 +29,8 @@ def _setup(context: Context):
         batch_size=int(cfg["batch-size"]),
         alpha=float(cfg["dirichlet-alpha"]),
         seed=int(cfg["seed"]),
+        dataset=str(cfg.get("dataset", "cifar10")),
+        har_split=str(cfg.get("har-split", "official")),
     )
     return trainloader, valloader
 
@@ -38,7 +40,7 @@ def train(msg: Message, context: Context):
     cfg = context.run_config
     epsilon = cfg["epsilon"]
 
-    model = Net()
+    model = build_model(str(cfg.get("dataset", "cifar10")))
     model.load_state_dict(msg.content["arrays"].to_torch_state_dict())
     device = get_device()
 
@@ -113,7 +115,7 @@ def train(msg: Message, context: Context):
 def evaluate(msg: Message, context: Context):
     # Evaluation is never privatised: it reads the global model, not local
     # gradients, and consumes no privacy budget.
-    model = Net()
+    model = build_model(str(context.run_config.get("dataset", "cifar10")))
     model.load_state_dict(msg.content["arrays"].to_torch_state_dict())
     device = get_device()
     model.to(device)

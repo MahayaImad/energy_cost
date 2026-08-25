@@ -2,18 +2,17 @@
 
 import os
 import random
+from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import DirichletPartitioner
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset as TorchDataset
 from torchvision.transforms import Compose, Normalize, ToTensor
-from datasets import load_dataset
 
 _testloader = None
+_har_testloader = None
 
 # ---------------------------------------------------------------- seeding
 
@@ -61,6 +60,43 @@ class Net(nn.Module):
         return self.fc3(x)
 
 
+class HARNet(nn.Module):
+    """1D CNN over raw inertial channels for UCI-HAR (9 x 128 -> 6 classes).
+
+    No BatchNorm: Opacus rejects it, since it mixes information across the
+    samples in a batch and breaks the per-sample gradient guarantee. Global
+    average pooling keeps the parameter count near the CIFAR model's (46k vs
+    62k), so per-round energy stays comparable between the two datasets and
+    a cross-dataset energy comparison is not dominated by model size.
+    """
+
+    def __init__(self, in_ch: int = 9, n_classes: int = 6) -> None:
+        super().__init__()
+        self.features = nn.Sequential(
+            nn.Conv1d(in_ch, 64, kernel_size=7, padding=3), nn.ReLU(),
+            nn.MaxPool1d(2),
+            nn.Conv1d(64, 64, kernel_size=5, padding=2), nn.ReLU(),
+            nn.MaxPool1d(2),
+            nn.Conv1d(64, 64, kernel_size=3, padding=1), nn.ReLU(),
+        )
+        self.head = nn.Sequential(nn.Dropout(0.3), nn.Linear(64, n_classes))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.features(x)
+        x = x.mean(dim=2)           # global average pool over time
+        return self.head(x)
+
+
+def build_model(dataset: str) -> nn.Module:
+    """Model for a dataset name. Keep every call site going through this."""
+    d = str(dataset).strip().lower()
+    if d in ("har", "uci-har", "uci_har"):
+        return HARNet()
+    if d in ("cifar10", "cifar-10", "cifar"):
+        return Net()
+    raise ValueError(f"unknown dataset {dataset!r}; expected 'cifar10' or 'har'")
+
+
 # ------------------------------------------------------------------- data
 
 DATASET = "uoft-cs/cifar10"
@@ -74,18 +110,149 @@ def _apply_transforms(batch):
     return batch
 
 
+# ------------------------------------------------------------------ UCI-HAR
+
+_har = None
+HAR_PATH = Path(os.environ.get("FL_HAR_NPZ", "data/har.npz"))
+
+
+class _ArrayDataset(TorchDataset):
+    """Tensors served under the same keys the CIFAR pipeline uses.
+
+    The key stays "img" although these are sensor windows: train_fn, test_fn
+    and train_private all index batches by that name, and renaming it here
+    would fork the training path per dataset for no benefit.
+    """
+
+    def __init__(self, X, y):
+        self.X = torch.from_numpy(np.ascontiguousarray(X))
+        self.y = torch.from_numpy(np.ascontiguousarray(y))
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, i):
+        return {"img": self.X[i], "label": self.y[i]}
+
+
+def _load_har():
+    """Load and standardise the prepared HAR arrays once per process."""
+    global _har
+    if _har is None:
+        if not HAR_PATH.is_file():
+            raise SystemExit(
+                f"{HAR_PATH} not found. Build it once with:\n"
+                '    python prepare_har.py --root "/path/to/UCI HAR Dataset"'
+            )
+        z = np.load(HAR_PATH)
+        mean, std = z["mean"], z["std"]
+        _har = {
+            "X_train": ((z["X_train"] - mean) / std).astype(np.float32),
+            "y_train": z["y_train"],
+            "s_train": z["subject_train"],
+            "X_test": ((z["X_test"] - mean) / std).astype(np.float32),
+            "y_test": z["y_test"],
+            "s_test": z["subject_test"],
+        }
+    return _har
+
+
+def _time_split(idx, frac: float):
+    """Split indices in file order, dropping one window at the boundary.
+
+    HAR windows overlap by 50%, so two adjacent windows share half their
+    samples. A random split would put those halves on both sides of the
+    train/test line and inflate accuracy. Splitting in order and discarding
+    the straddling window removes the shared samples.
+    """
+    cut = max(1, int(len(idx) * frac))
+    return idx[: cut - 1], idx[cut:]
+
+
+def _har_partition(partition_id: int, num_partitions: int, batch_size: int,
+                   split: str):
+    """One client = one study participant.
+
+    'official' keeps the published subject-disjoint split: the 21 training
+    participants become clients and the 9 test participants are held out
+    entirely, so central accuracy measures generalisation to people the
+    federation never saw. 'all' makes clients of all 30 participants and
+    holds out a time-ordered tail of each one instead, which trades that
+    guarantee for more clients.
+    """
+    h = _load_har()
+    if split == "official":
+        subs = np.unique(h["s_train"])
+        X, y, sub = h["X_train"], h["y_train"], h["s_train"]
+    else:
+        subs = np.unique(np.concatenate([h["s_train"], h["s_test"]]))
+        X = np.concatenate([h["X_train"], h["X_test"]])
+        y = np.concatenate([h["y_train"], h["y_test"]])
+        sub = np.concatenate([h["s_train"], h["s_test"]])
+
+    if num_partitions != len(subs):
+        raise SystemExit(
+            f"HAR split '{split}' has {len(subs)} participants but the "
+            f"federation was given {num_partitions} supernodes. Set both "
+            f"num-supernodes and num_supernodes to {len(subs)}."
+        )
+
+    own = np.where(sub == subs[partition_id])[0]
+    if split == "all":
+        own, _ = _time_split(own, 0.8)      # tail goes to the central test set
+    tr, va = _time_split(own, 0.8)
+
+    trainloader = DataLoader(
+        _ArrayDataset(X[tr], y[tr]), batch_size=batch_size,
+        shuffle=True, drop_last=False,
+    )
+    valloader = DataLoader(_ArrayDataset(X[va], y[va]), batch_size=batch_size)
+    return trainloader, valloader
+
+
+def _har_testset(batch_size: int, split: str):
+    h = _load_har()
+    if split == "official":
+        return DataLoader(
+            _ArrayDataset(h["X_test"], h["y_test"]), batch_size=batch_size
+        )
+    X = np.concatenate([h["X_train"], h["X_test"]])
+    y = np.concatenate([h["y_train"], h["y_test"]])
+    sub = np.concatenate([h["s_train"], h["s_test"]])
+    keep = []
+    for sid in np.unique(sub):
+        own = np.where(sub == sid)[0]
+        _, tail = _time_split(own, 0.8)
+        keep.append(tail)
+    keep = np.concatenate(keep)
+    return DataLoader(_ArrayDataset(X[keep], y[keep]), batch_size=batch_size)
+
+
+# --------------------------------------------------------------- dispatch
+
+
 def load_partition(
     partition_id: int,
     num_partitions: int,
     batch_size: int,
     alpha: float,
     seed: int,
+    dataset: str = "cifar10",
+    har_split: str = "official",
 ):
     """Dirichlet (non-IID) partition -> local train/val dataloaders.
 
     alpha controls heterogeneity: lower = more skewed label distributions.
     Report the value you used; alpha=0.5 is the common non-IID setting.
     """
+    if str(dataset).strip().lower() in ("har", "uci-har", "uci_har"):
+        return _har_partition(partition_id, num_partitions, batch_size, har_split)
+
+    # Imported lazily so a HAR run needs neither flwr-datasets nor the
+    # vision extra: the two datasets share no loading machinery.
+    from flwr_datasets import FederatedDataset
+    from flwr_datasets.partitioner import DirichletPartitioner
+
     global _fds
     if _fds is None:
         partitioner = DirichletPartitioner(
@@ -112,13 +279,22 @@ def load_partition(
     return trainloader, valloader
 
 
-def load_centralized_testset(batch_size: int = 256):
+def load_centralized_testset(batch_size: int = 256, dataset: str = "cifar10",
+                            har_split: str = "official"):
     """Held-out CIFAR-10 test split for server-side evaluation.
 
     Loaded straight from the hub: the ServerApp runs in a separate process
     from the ClientApps and must not depend on the partitioner state.
     Cached because global_evaluate is called every round.
     """
+    if str(dataset).strip().lower() in ("har", "uci-har", "uci_har"):
+        global _har_testloader
+        if _har_testloader is None:
+            _har_testloader = _har_testset(batch_size, har_split)
+        return _har_testloader
+
+    from datasets import load_dataset
+
     global _testloader
     if _testloader is None:
         testset = load_dataset(DATASET, split="test").with_transform(_apply_transforms)
