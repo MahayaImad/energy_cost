@@ -374,6 +374,39 @@ def check(by_eps, runs=None) -> bool:
         else:
             print(f"    {eps:>6} : ok")
 
+    # Idle baselines must agree across runs: they are all the same card doing
+    # nothing. One that stands out was probed before the GPU had wound down
+    # from the previous run, and since net energy subtracts idle*t, it
+    # under-states that run's net energy without affecting anything else.
+    print("\n[3b] Idle baseline agreement across runs")
+    idles = [
+        (str(r["config"]["epsilon"]), r["config"]["seed"], r["totals"]["idle_power_w"])
+        for r in (runs or [])
+        if "idle_power_w" in r.get("totals", {})
+    ]
+    if not idles:
+        print("    n/a (runs predate idle logging)")
+    else:
+        med = float(np.median([v for _, _, v in idles]))
+        bad = [(e, sd, v) for e, sd, v in idles if abs(v - med) > max(2.0, 0.10 * med)]
+        never = [
+            (str(r["config"]["epsilon"]), r["config"]["seed"])
+            for r in runs
+            if r.get("totals", {}).get("idle_settled") is False
+        ]
+        print(f"    median {med:.2f} W over {len(idles)} runs")
+        for e, sd, v in bad:
+            print(f"    eps={e:>5} seed={sd}: {v:.2f} W  <-- {v - med:+.1f} W off median")
+        for e, sd in never:
+            print(f"    eps={e:>5} seed={sd}: probe never settled")
+        if bad or never:
+            print("    FAIL: contaminated idle baseline. Net energy for these runs")
+            print("          is wrong; re-run them. The GPU had not wound down")
+            print("          from the previous run when the probe started.")
+            ok = False
+        else:
+            print("    ok: all baselines within tolerance of the median")
+
     w, pct = noise_floor(by_eps)
     print(f"\n[4] Measurement noise floor: +/-{w:.2f} W ({pct:.2f}%)")
     print("    No effect smaller than this is resolvable. State it before")
