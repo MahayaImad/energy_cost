@@ -228,10 +228,19 @@ def main(grid: Grid, context: Context) -> None:
     # baseline is. Set idle-probe-s to 0 to skip the probe.
     probe_s = float(cfg.get("idle-probe-s", 5.0))
     if probe_s > 0:
-        idle_w, idle_sd = energy.measure_idle_power_stats(probe_s)
+        # Settle first: a sweep runs back to back, and probing before the
+        # card has wound down from the previous run reads a busy baseline,
+        # which under-states this run's net energy.
+        settled, waited = energy.wait_until_settled()
+        idle_w, idle_sd = energy.measure_idle_power_stats(probe_s, settle=False)
     else:
+        settled, waited = True, 0.0
         idle_w, idle_sd = energy.power_w(), 0.0
-    print(f"[energy] idle baseline {idle_w:.2f} W (sd {idle_sd:.2f}) over {probe_s:.0f}s")
+    print(
+        f"[energy] idle baseline {idle_w:.2f} W (sd {idle_sd:.2f}) over "
+        f"{probe_s:.0f}s, settled after {waited:.1f}s"
+        + ("" if settled else " [WARN: never settled]")
+    )
 
     t_start = time.perf_counter()
 
@@ -299,6 +308,8 @@ def main(grid: Grid, context: Context) -> None:
             "energy_j_net_idle": round(max(0.0, total_j - idle_w * measured_s), 3),
             "idle_power_w": round(idle_w, 3),
             "idle_power_w_sd": round(idle_sd, 3),
+            "idle_settled": bool(settled),
+            "idle_settle_wait_s": round(waited, 2),
         },
         "rounds": strategy.rounds,
     }

@@ -62,14 +62,56 @@ def measure_idle_power(seconds: float = 20.0, samples: int = 40) -> float:
     return sum(readings) / len(readings)
 
 
-def measure_idle_power_stats(seconds: float = 5.0, interval: float = 0.25):
+def wait_until_settled(
+    tol_w: float = 1.0,
+    timeout_s: float = 60.0,
+    interval: float = 0.5,
+    window: int = 4,
+):
+    """Block until board power stops changing. Returns (settled, waited_s).
+
+    A GPU does not drop to its floor the instant a run ends; clocks and fans
+    wind down over seconds. Probing the idle baseline before that happens
+    reads a still-busy card, and since net energy subtracts idle*t, an
+    inflated baseline silently UNDER-states net compute energy for that run.
+
+    Short runs make this easy to hit: back-to-back HAR runs 35 s apart put
+    the probe inside the previous run's tail and produced a 29.5 W baseline
+    where neighbouring conditions read 18.6-19.9 W, which was enough on its
+    own to fail the per-round flatness check.
+
+    Settling is judged by stability, not by an absolute floor, since the
+    floor is hardware-specific and unknown here. A steady but genuinely busy
+    card therefore still looks settled -- that case is caught afterwards by
+    comparing baselines across runs.
+    """
+    init()
+    t0 = time.perf_counter()
+    recent: list[float] = []
+    while time.perf_counter() - t0 < timeout_s:
+        recent.append(power_w())
+        if len(recent) > window:
+            recent.pop(0)
+        if len(recent) == window and max(recent) - min(recent) <= tol_w:
+            return True, time.perf_counter() - t0
+        time.sleep(interval)
+    return False, time.perf_counter() - t0
+
+
+def measure_idle_power_stats(
+    seconds: float = 5.0, interval: float = 0.25, settle: bool = True
+):
     """(mean, sample sd) of idle board power over a quiet window.
 
     Net-of-idle energy subtracts this baseline from every run, so a single
     instantaneous reading is too thin a basis: report the spread alongside
     the mean and let the paper state how firm the baseline is.
+
+    Waits for the card to settle first; see wait_until_settled.
     """
     init()
+    if settle:
+        wait_until_settled()
     n = max(2, int(seconds / interval))
     readings = []
     for _ in range(n):
