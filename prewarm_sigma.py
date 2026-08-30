@@ -32,7 +32,11 @@ from energyfl import dp
 DATASET = "uoft-cs/cifar10"
 EPSILONS = (0.5, 1, 2, 4, 8)
 SEEDS = (0, 1, 2)
-BATCH, ROUNDS, FRAC = 32, 30, 0.5
+BATCH, FRAC = 32, 0.5
+# Rounds is a CLI argument, not a constant: it enters total_local_steps and
+# therefore the cache key. Prewarming at 30 rounds and then sweeping at 150
+# misses every lookup, so the accountant runs inside the measurement window
+# again and its epsilon-dependent cost reappears as a fake cost of privacy.
 
 
 def partition_sizes(num_partitions: int, alpha: float, seed: int):
@@ -79,6 +83,8 @@ def har_partition_sizes(num_partitions: int, split: str):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default="cifar10", choices=["cifar10", "har"])
+    ap.add_argument("--rounds", type=int, default=30,
+                    help="must match num-server-rounds of the sweep")
     ap.add_argument("--har-split", default="official", choices=["official", "all"])
     ap.add_argument("--ablation", action="store_true",
                     help="also cover the ablation grid (alpha, clients, epochs)")
@@ -116,17 +122,17 @@ def main():
             label = (f"clients={clients} split={a.har_split} epochs={epochs}"
                      if a.dataset == "har"
                      else f"clients={clients} alpha={alpha} epochs={epochs} seed={seed}")
-            print(f"\n{label}: n = {min(sizes)}..{max(sizes)}")
+            print(f"\n{label} rounds={a.rounds}: n = {min(sizes)}..{max(sizes)}")
             for eps in EPSILONS:
                 sig = []
                 for n in sizes:
                     key = dp.sigma_cache_key(
-                        eps, n, BATCH, ROUNDS, FRAC, epochs, dp.TARGET_DELTA
+                        eps, n, BATCH, a.rounds, FRAC, epochs, dp.TARGET_DELTA
                     )
                     if key not in cache:
                         cache[key] = dp.noise_multiplier_for(
                             epsilon=eps, n_examples=n, batch_size=BATCH,
-                            num_rounds=ROUNDS, fraction_train=FRAC,
+                            num_rounds=a.rounds, fraction_train=FRAC,
                             local_epochs=epochs,
                         )
                     sig.append(cache[key])

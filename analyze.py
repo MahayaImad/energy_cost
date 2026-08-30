@@ -825,6 +825,38 @@ def paper(runs, by_eps):
     print()
 
 
+def curve(runs):
+    """Where does accuracy plateau? Reads the round budget off the data.
+
+    Choosing num_rounds by eye from a plot invites stopping while the model
+    is still climbing, which is what made the first HAR sweep uninterpretable:
+    every condition peaked at the last round, so nothing had converged and the
+    peak-then-decline question was never actually put to the test.
+    """
+    for r in sorted(runs, key=lambda x: (str(x["config"]["epsilon"]),
+                                         x["config"]["seed"])):
+        acc = [rd.get("central_acc", float("nan")) for rd in r["rounds"]]
+        n = len(acc)
+        best = float(np.nanmax(acc))
+        at = lambda f: next(
+            (i + 1 for i, v in enumerate(acc) if v >= f * best), None
+        )
+        print(f"\neps={r['config']['epsilon']} seed={r['config']['seed']}  "
+              f"{n} rounds, best {best:.4f} at round {int(np.nanargmax(acc)) + 1}, "
+              f"final {acc[-1]:.4f}")
+        step = max(1, n // 12)
+        traj = "  ".join(f"r{i+1}:{acc[i]:.3f}" for i in range(0, n, step))
+        print(f"    {traj}")
+        r95, r99 = at(0.95), at(0.99)
+        print(f"    reaches 95% of best at round {r95}, 99% at {r99}")
+        if r99 and r99 > 0.9 * n:
+            print("    STILL CLIMBING at the end: the budget is too short to")
+            print("    tell convergence from truncation. Extend it.")
+        elif r95:
+            print(f"    -> a budget near {int(r95 * 1.3)} rounds would capture")
+            print("       convergence with headroom to see any decline after it.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("results", nargs="?", default="results", type=Path)
@@ -833,6 +865,8 @@ def main():
                     help="summarise ablation runs by varied factor")
     ap.add_argument("--paper", action="store_true",
                     help="emit every checklist number and statement")
+    ap.add_argument("--curve", action="store_true",
+                    help="per-run accuracy trajectory and plateau round")
     ap.add_argument("--targets", default=None,
                     help="comma-separated target accuracies, e.g. 0.5,0.7,0.85")
     a = ap.parse_args()
@@ -853,6 +887,9 @@ def main():
         TARGET_ACCS = TARGET_ACCS_BY_DATASET.get(name, TARGET_ACCS)
     print(f"dataset: {name}   targets: {TARGET_ACCS}\n")
 
+    if a.curve:
+        curve(runs)
+        return
     if a.paper:
         paper(runs, by_eps)
         return
