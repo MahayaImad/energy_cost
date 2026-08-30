@@ -113,6 +113,32 @@ def main():
     print(f"    n = {min(cnt)}..{max(cnt)}, mean {sum(cnt)/len(cnt):.0f}")
     print("  Re-derive sigma for these sizes: python prewarm_sigma.py --dataset har")
 
+    # Class coverage per client. UCI-HAR records the six activities in blocks,
+    # so any partitioning that cuts a participant's recording by position
+    # rather than within each class leaves clients training on a subset of the
+    # activities. That is silent: training runs, energy looks normal, and only
+    # the gap between client-side and central accuracy gives it away.
+    try:
+        import os
+        os.environ.setdefault("FL_HAR_NPZ", str(a.out))
+        from energyfl.task import load_partition
+
+        print("\n  class coverage per client (all six expected on both sides):")
+        bad = 0
+        n_clients = len(np.unique(str_))
+        for pid in range(n_clients):
+            tl, vl = load_partition(pid, n_clients, 32, 0.5, 0,
+                                    dataset="har", har_split="official")
+            ctr = set(tl.dataset.y.tolist())
+            cva = set(vl.dataset.y.tolist())
+            if len(ctr) < N_CLASSES or len(cva) < N_CLASSES:
+                bad += 1
+                print(f"    client {pid}: train {sorted(ctr)} val {sorted(cva)}  <-- INCOMPLETE")
+        print(f"    {n_clients - bad}/{n_clients} clients hold all {N_CLASSES} "
+              "activities in both train and validation")
+    except Exception as exc:
+        print(f"\n  [skipped class-coverage check: {exc}]")
+
 
 if __name__ == "__main__":
     main()
