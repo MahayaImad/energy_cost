@@ -34,6 +34,9 @@ GPU_SHARE="${GPU_SHARE:-0.25}"
 
 # DATASET=har ./run_sweep.sh runs the HAR sweep into results_har/.
 DATASET="${DATASET:-cifar10}"
+# Round budget. Must be passed to BOTH the prewarm and the runs: sigma depends
+# on it, so a mismatch silently voids the sigma cache.
+ROUNDS="${ROUNDS:-30}"
 HAR_SPLIT="${HAR_SPLIT:-official}"
 # Must match num-supernodes in [tool.flwr.app.config]: one is what the
 # federation spawns, the other is what the app partitions the data for.
@@ -75,9 +78,9 @@ echo
 # Derive every sigma before any measurement starts, so the accountant's
 # binary search never runs inside a measured round. Cheap, and idempotent.
 if [ "$DATASET" = "har" ]; then
-  python prewarm_sigma.py --dataset har --har-split "$HAR_SPLIT"
+  python prewarm_sigma.py --dataset har --har-split "$HAR_SPLIT" --rounds "$ROUNDS"
 else
-  python prewarm_sigma.py
+  python prewarm_sigma.py --rounds "$ROUNDS"
 fi
 
 for PAIR in "${PAIRS[@]}"; do
@@ -91,7 +94,7 @@ for PAIR in "${PAIRS[@]}"; do
     echo "=== $TAG ==="
     flwr run . --stream \
       --federation-config "$FEDCFG" \
-      --run-config "seed=$SEED epsilon='$EPS' run-id='$TAG' dataset='$DATASET' har-split='$HAR_SPLIT' num-supernodes=$NUM_SUPERNODES results-dir='$OUT'" \
+      --run-config "seed=$SEED epsilon='$EPS' run-id='$TAG' dataset='$DATASET' har-split='$HAR_SPLIT' num-supernodes=$NUM_SUPERNODES num-server-rounds=$ROUNDS results-dir='$OUT'" \
       2>&1 | tee "logs/${TAG}.log"
   }
 done
