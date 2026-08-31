@@ -13,8 +13,6 @@ GPU, no dataset, no Flower.
        and the epsilon spent never exceeds the epsilon claimed.
 """
 
-import math
-
 import torch
 import torch.nn as nn
 from opacus import PrivacyEngine
