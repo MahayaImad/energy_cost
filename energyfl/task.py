@@ -157,16 +157,36 @@ def _load_har():
     return _har
 
 
-def _time_split(idx, frac: float):
-    """Split indices in file order, dropping one window at the boundary.
+def _time_split(idx, labels, frac: float):
+    """Split indices per class, in file order, dropping the straddling window.
 
-    HAR windows overlap by 50%, so two adjacent windows share half their
-    samples. A random split would put those halves on both sides of the
-    train/test line and inflate accuracy. Splitting in order and discarding
-    the straddling window removes the shared samples.
+    Two constraints pull in opposite directions here. HAR windows overlap by
+    50%, so two adjacent windows share half their samples and a random split
+    would put those halves on both sides of the train/test line; splitting in
+    file order and discarding the straddling window fixes that. But a
+    participant records the six activities in BLOCKS, so a single ordered cut
+    across the whole recording hands the earlier activities to one side and
+    the later ones to the other. Clients then train on a subset of the classes
+    and validate on classes they never saw.
+
+    That is not hypothetical: it is what the first HAR runs did. Client-side
+    accuracy came out at 0.268 against 0.478 on nine unseen participants --
+    local validation, on the same person, scoring 21 points WORSE than
+    generalisation to strangers, which only makes sense if the two sides hold
+    different classes.
+
+    Splitting within each class satisfies both: every side gets all six
+    activities, and the cut inside a class is still ordered, so overlapping
+    neighbours stay together apart from the one window dropped at each
+    class boundary.
     """
-    cut = max(1, int(len(idx) * frac))
-    return idx[: cut - 1], idx[cut:]
+    a, b = [], []
+    for c in np.unique(labels[idx]):
+        own = idx[labels[idx] == c]
+        cut = max(1, int(len(own) * frac))
+        a.append(own[: cut - 1])
+        b.append(own[cut:])
+    return np.concatenate(a), np.concatenate(b)
 
 
 def _har_partition(partition_id: int, num_partitions: int, batch_size: int,
@@ -199,8 +219,8 @@ def _har_partition(partition_id: int, num_partitions: int, batch_size: int,
 
     own = np.where(sub == subs[partition_id])[0]
     if split == "all":
-        own, _ = _time_split(own, 0.8)      # tail goes to the central test set
-    tr, va = _time_split(own, 0.8)
+        own, _ = _time_split(own, y, 0.8)   # tail goes to the central test set
+    tr, va = _time_split(own, y, 0.8)
 
     trainloader = DataLoader(
         _ArrayDataset(X[tr], y[tr]), batch_size=batch_size,
@@ -222,7 +242,7 @@ def _har_testset(batch_size: int, split: str):
     keep = []
     for sid in np.unique(sub):
         own = np.where(sub == sid)[0]
-        _, tail = _time_split(own, 0.8)
+        _, tail = _time_split(own, y, 0.8)
         keep.append(tail)
     keep = np.concatenate(keep)
     return DataLoader(_ArrayDataset(X[keep], y[keep]), batch_size=batch_size)
