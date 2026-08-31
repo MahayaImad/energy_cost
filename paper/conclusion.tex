@@ -1,54 +1,43 @@
-% Section VI -- Conclusion. No number appears here that is not established in
-% Section IV.
+% Section VI -- Conclusion. No number here that is not in Section IV.
 
 \section{Conclusion}
 
 We measured what differential privacy costs in energy when added to federated
 learning, using hardware counters around each round on two datasets, with
-UCI-HAR partitioned so that each client holds one study participant's data.
+UCI-HAR partitioned so each client holds one study participant's data.
 
-The cost divides in two. A fixed per-round overhead of $+45\%$ on HAR and
-$+60\%$ on CIFAR-10, flat in $\varepsilon$ within our resolution, comes from
-per-sample gradient computation and clipping. Everything else acts through the
+The cost divides in two. A fixed per-round overhead --- $+45\%$ on HAR,
+$+60\%$ on CIFAR-10, flat in $\varepsilon$ within our resolution --- comes
+from per-sample gradients and clipping. Everything else acts through the
 number of rounds required, and it is the larger term: reaching $0.70$ accuracy
-on HAR costs $5.8\times$ the non-private energy at $\varepsilon=4$, and is
-unreachable at $\varepsilon \le 2$ regardless of expenditure. The two respond
-to different interventions, which is why separating them matters more than
-quantifying either.
+on HAR costs $5.8\times$ the non-private energy at $\varepsilon = 4$ and is
+unreachable at $\varepsilon \le 2$ regardless of expenditure. Separating them
+matters more than quantifying either, since they respond to different
+interventions.
 
-Three practical rules follow. The round budget should be derived from the
-privacy budget rather than from the task, since rounds consume budget and
-training to convergence is self-defeating under tight privacy --- at
-$\varepsilon=0.5$ on HAR, $83\%$ of a run's energy is spent after the accuracy
-peak. The privacy budget and the accuracy requirement should be chosen
-together rather than in sequence, because a budget implies a quality ceiling
-that no amount of computation reaches. And when the private model is
-noise-limited, hyperparameter search is not the lever: on HAR at
-$\varepsilon=1$, varying local epochs or the clipping norm moved accuracy by
-under $3\%$ against a $9.46\%$ noise floor.
+Three rules follow. Derive the round budget from the privacy budget rather
+than the task, since rounds consume budget and training to convergence is
+self-defeating --- at $\varepsilon = 0.5$ on HAR, $83\%$ of a run's energy
+falls after the accuracy peak. Choose the privacy budget and the accuracy
+requirement together, because a budget implies a ceiling no computation
+reaches. And when the private model is noise-limited, hyperparameter search is
+not the lever.
 
-Because the cost is measured in joules, it inherits the carbon intensity of
-wherever training runs: the privacy premium on 1000 HAR runs is $18.8$ times
-larger on Algeria's grid than on Norway's, for identical computation and an
-identical guarantee. This is a dimension of privacy budget selection that a
-privacy--utility evaluation cannot represent, and it is particularly awkward
-for federated learning, where the computation is distributed across whatever
-grids the participating devices sit on.
+Paid in joules, the cost inherits the carbon intensity of wherever training
+runs: an $18.8\times$ range between Algeria's grid and Norway's for an
+identical guarantee. A privacy--utility evaluation cannot represent this, and
+it is awkward for federated learning, where the computation sits on whatever
+grids the participating devices do.
 
 We also report a measurement hazard. Instrumentation attached to a privacy
-mechanism tends to scale with the privacy parameter, so its cost mimics the
-effect under study; the accountant's noise-calibration search alone reproduced
-the entire $\varepsilon$ trend in one of our sweeps. Deriving the noise
-multipliers before measurement, verifying per round that executed and
-calibrated step counts agree, and randomising run order are cheap controls
-that we recommend for any energy study of a privacy mechanism.
+mechanism scales with the privacy parameter, so its cost mimics the effect
+under study; deriving noise multipliers before measurement, verifying step
+counts per round, and randomising run order are cheap controls we recommend
+for any such study.
 
-Two limits bound what we claim. Clients are virtual and share one GPU, so the
-ratios reported here transfer to real devices but the absolute joules do not;
-confirming them on physical hardware is the immediate next step. And our two
-datasets bound the effects rather than establishing them --- the per-round
-overhead and the quality ceiling appear on both, while the stopping round and
-the sensitivity to hyperparameters each appear on one. Characterising where
-the boundary between those regimes falls, and whether it is set by task
-difficulty, by the magnitude of the noise, or by their ratio, is the question
-this work leaves open.
+Two limits bound the claims: clients are virtual and share one GPU, so the
+ratios transfer but the absolute joules do not, and our two datasets bound the
+effects rather than establishing them. Characterising where the boundary
+between those regimes falls --- whether it is set by task difficulty, by the
+magnitude of the noise, or by their ratio --- is the question this work leaves
+open.
