@@ -1,0 +1,83 @@
+% The Energy Cost of Privacy in Federated Learning -- cSIS 2026, Track 1.
+%
+% Build:  pdflatex main && bibtex main && pdflatex main && pdflatex main
+%
+% BEFORE SUBMISSION
+%   - fill in the author block below (affiliation is a placeholder)
+%   - copy the PNGs written by `python analyze.py results_har/` into this
+%     directory, or point \graphicspath at wherever they live
+%   - check IEEEtran.cls and IEEEtran.bst are on the path (texlive-publishers)
+
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{url}
+
+% Deliberately only the local directory. analyze.py writes identically named
+% PNGs into results_har/ and results/, so listing both here would silently
+% pick one set. Copy the set you mean beside main.tex.
+% NOTE: the captions in figures.tex describe the CIFAR-10 run (6.38\% noise
+% floor, 228/12 gCO2eq) while Section IV is HAR-primary -- regenerate from
+% results_har/ and update them, or relabel those figures as CIFAR-10.
+\graphicspath{{./}}
+
+\begin{document}
+
+\title{The Energy Cost of Privacy in Federated Learning}
+
+% TODO: affiliation and department are placeholders.
+\author{\IEEEauthorblockN{Imad Mahaya}
+\IEEEauthorblockA{\textit{Department} \\
+\textit{University} \\
+Algeria \\
+mahaya.imad@gmail.com}
+}
+
+\maketitle
+
+\begin{abstract}
+Differential privacy in federated learning is evaluated along two axes,
+privacy and utility. On battery-powered edge devices a third decides whether a
+configuration is deployable at all, and it is not reported. We measure the
+energy cost of client-level differential privacy with NVML hardware counters
+differenced around each federated round, sweeping the privacy budget on
+UCI-HAR, whose clients are the individual study participants, and on CIFAR-10.
+The cost separates in two. A fixed per-round overhead from per-sample
+gradients and clipping costs $+45\%$ on HAR and $+60\%$ on CIFAR-10 and does
+not vary with $\varepsilon$; everything budget-dependent acts through the
+number of rounds required, and is the larger term. Measured as
+energy-to-target-accuracy, privacy is free at $0.40$ accuracy on HAR,
+$5.8\times$ at $0.70$, and unbounded at $0.85$, which no budget we tested
+reaches at any expenditure. Because the cost is paid in joules it inherits the
+local carbon intensity, an $18.8\times$ range between Algeria's grid and
+Norway's for an identical guarantee. We also report a measurement hazard:
+running the privacy accountant's noise calibration inside the timed loop
+reproduced an entire apparent $\varepsilon$ trend.
+\end{abstract}
+
+\begin{IEEEkeywords}
+federated learning, differential privacy, energy efficiency, green AI, carbon
+footprint, edge computing, human activity recognition
+\end{IEEEkeywords}
+
+\input{introduction}
+\input{related-work}
+\input{methodology}
+
+% Figures live in their own file but must be declared BEFORE the text that
+% references them: LaTeX floats forward only, so inputting them after
+% Section IV would push all three to the end of the paper.
+\input{figures}
+
+\input{results}
+\input{discussion}
+\input{conclusion}
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+
+\end{document}
