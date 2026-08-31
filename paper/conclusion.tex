@@ -1,0 +1,43 @@
+% Section VI -- Conclusion. No number here that is not in Section IV.
+
+\section{Conclusion}
+
+We measured what differential privacy costs in energy when added to federated
+learning, using hardware counters around each round on two datasets, with
+UCI-HAR partitioned so each client holds one study participant's data.
+
+The cost divides in two. A fixed per-round overhead --- $+45\%$ on HAR,
+$+60\%$ on CIFAR-10, flat in $\varepsilon$ within our resolution --- comes
+from per-sample gradients and clipping. Everything else acts through the
+number of rounds required, and it is the larger term: reaching $0.70$ accuracy
+on HAR costs $5.8\times$ the non-private energy at $\varepsilon = 4$ and is
+unreachable at $\varepsilon \le 2$ regardless of expenditure. Separating them
+matters more than quantifying either, since they respond to different
+interventions.
+
+Three rules follow. Derive the round budget from the privacy budget rather
+than the task, since rounds consume budget and training to convergence is
+self-defeating --- at $\varepsilon = 0.5$ on HAR, $83\%$ of a run's energy
+falls after the accuracy peak. Choose the privacy budget and the accuracy
+requirement together, because a budget implies a ceiling no computation
+reaches. And when the private model is noise-limited, hyperparameter search is
+not the lever.
+
+Paid in joules, the cost inherits the carbon intensity of wherever training
+runs: an $18.8\times$ range between Algeria's grid and Norway's for an
+identical guarantee. A privacy--utility evaluation cannot represent this, and
+it is awkward for federated learning, where the computation sits on whatever
+grids the participating devices do.
+
+We also report a measurement hazard. Instrumentation attached to a privacy
+mechanism scales with the privacy parameter, so its cost mimics the effect
+under study; deriving noise multipliers before measurement, verifying step
+counts per round, and randomising run order are cheap controls we recommend
+for any such study.
+
+Two limits bound the claims: clients are virtual and share one GPU, so the
+ratios transfer but the absolute joules do not, and our two datasets bound the
+effects rather than establishing them. Characterising where the boundary
+between those regimes falls --- whether it is set by task difficulty, by the
+magnitude of the noise, or by their ratio --- is the question this work leaves
+open.

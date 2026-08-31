@@ -1,160 +1,145 @@
-% Section III -- Methodology.
-% Numbers here come from `python analyze.py results/ --paper` on the 18-run
-% sweep (6 epsilon x 3 seeds). If a run is added or a control changes,
-% regenerate that output and update this file rather than editing by hand.
-% One figure is left to verify against this sweep -- see the VERIFY comment
-% in the Energy Measurement subsection.
-% Citation keys are placeholders: \cite{opacus}, \cite{flower}, \cite{rdp},
-% \cite{dpsgd}, \cite{dirichlet}, \cite{nvml}.
+% Section III -- Methodology (condensed).
+% Numbers from `python analyze.py results_har/ --paper`. Citations are
+% placeholders: \cite{flower}, \cite{opacus}, \cite{rdp}, \cite{dirichlet},
+% \cite{nvml}, \cite{uci-har}.
 
 \section{Methodology}
 
 \subsection{Federated Setup}
 
-We train a five-layer convolutional network (0.24~MB) on CIFAR-10 across 20
-simulated clients using the Flower framework~\cite{flower}. Each round samples
-50\% of clients for training and 50\% for evaluation. Client data is
-partitioned by a Dirichlet distribution over labels with $\alpha=0.5$, the
-standard non-IID setting~\cite{dirichlet}; partition sizes therefore differ
-between clients, which matters for privacy accounting below. Clients perform
-one local epoch of SGD per round (batch size 32, learning rate 0.01, momentum
-0.9) and the server aggregates by FedAvg over 30 rounds. Every configuration
-is repeated with three seeds.
+Both datasets run on Flower~\cite{flower} with FedAvg, $50\%$ of clients
+sampled per round for training and $50\%$ for evaluation, one local epoch
+(batch 32, SGD at lr $0.01$, momentum $0.9$), and three seeds per
+configuration.
+
+\textbf{UCI-HAR}~\cite{uci-har} is primary. We keep the published
+subject-disjoint split: its 21 training participants become the federation's
+clients, one per person, and the 9 test participants are held out entirely, so
+central accuracy measures generalisation to people the federation never saw.
+\emph{Clients correspond to individual study participants}, so the partition
+is given by who contributed the data rather than by a heterogeneity parameter.
+Each client holds about 279 training windows. We train on the raw inertial
+signals (nine channels, 128 samples per $2.56$~s window) with a three-block 1D
+CNN and global average pooling ($37$k parameters), close enough to the
+CIFAR-10 model's $62$k that per-round energy stays comparable. Neither model
+uses batch normalisation, which Opacus~\cite{opacus} rejects.
+
+Local train and validation sets are split \emph{within each activity class},
+in file order, discarding the straddling window. HAR windows overlap by
+$50\%$, so a random split would place two halves of one window on opposite
+sides of the line; and participants record the six activities in blocks, so a
+single ordered cut would leave clients training on a subset of the classes.
+Splitting within each class satisfies both constraints.
+
+We train HAR for 100 rounds: the non-private model reaches $95\%$ of its final
+accuracy only at round 59, so a shorter budget could not distinguish
+convergence from truncation. The budget is not a free parameter here, since it
+enters the accounting directly.
+
+\textbf{CIFAR-10} is secondary: a five-layer CNN ($62$k parameters) across 20
+clients over 30 rounds, partitioned by a Dirichlet distribution over labels at
+$\alpha = 0.5$~\cite{dirichlet}.
 
 \subsection{Privacy Accounting}
 
 We enforce \emph{client-level local differential privacy}: each client holds
-its own $(\varepsilon,\delta)$ budget over the entire federated run, and the
-server is untrusted.
-
-The budget is accounted over all local SGD steps a client takes across all
-rounds in which it participates --- not per round, and not per local epoch.
-For a client with $n$ local training examples, batch size $B$, $R$ rounds,
-client sampling fraction $q_c$ and $E$ local epochs:
+its own $(\varepsilon, \delta)$ budget over the entire run, and the server is
+untrusted. The budget is accounted over all local SGD steps a client takes
+across all rounds in which it participates --- not per round, and not per
+local epoch. For a client with $n$ examples, batch $B$, $R$ rounds, sampling
+fraction $q_c$ and $E$ local epochs:
 %
-\begin{align}
-  s_{\text{epoch}} &= \lceil n / B \rceil \\
-  s_{\text{total}} &= R \, q_c \, E \, s_{\text{epoch}}
-\end{align}
+\begin{equation}
+  s_{\text{total}} = R \, q_c \, E \, \lceil n / B \rceil
+\end{equation}
 %
-We invert the RDP accountant~\cite{rdp} once, before training starts, to find
-the noise multiplier $\sigma$ that yields the target $\varepsilon$ at $\delta$
-after $s_{\text{total}}$ steps, and hold $\sigma$ constant for the run.
+We invert the RDP accountant~\cite{rdp} once, before training, to find the
+noise multiplier $\sigma$ giving the target $\varepsilon$ at
+$\delta = 10^{-5}$ after $s_{\text{total}}$ steps, and hold it constant.
+Precomputation is deliberate: in simulation each client is reconstructed every
+round, so an engine-internal accountant resets each round and reports a
+per-round $\varepsilon$ while the true budget compounds.
 
-Precomputation is deliberate. In simulation each client object is
-reconstructed every round, so an engine-internal accountant resets each round
-and reports a per-round $\varepsilon$ while the true budget compounds ---
-understating the privacy loss by roughly a factor of the round count.
+Two properties deserve statement. Opacus samples at rate
+$1/\lceil n/B \rceil$ rather than $B/n$, and we calibrate at the rate the
+sampler actually uses. And we claim \textbf{no amplification by client
+subsampling}, which would require secure aggregation or a shuffler; the
+reported $\varepsilon$ is an upper bound.
 
-Two properties of the sampling deserve statement. First, Opacus'
-\texttt{DPDataLoader} samples at rate $1/\lceil n/B \rceil$ rather than $B/n$;
-we calibrate at the rate the sampler actually uses, so the realised
-$\varepsilon$ matches the target to within the accountant's search tolerance
-rather than being conservative by an unstated margin. Second, we claim
-\textbf{no privacy amplification by client subsampling}: amplification
-requires secure aggregation or a shuffler, neither of which we assume. The
-reported $\varepsilon$ is therefore an upper bound.
-
-Because Dirichlet partitions differ in size, $\sigma$ differs per client.
-Table~\ref{tab:sigma} reports the observed range.
-
-\begin{table}[t]
-\caption{Per-client noise multiplier, 30 rounds, $\delta=10^{-5}$}
-\label{tab:sigma}
-\centering
-\begin{tabular}{lcc}
-\hline
-$\varepsilon$ & $\sigma_{\min}$ & $\sigma_{\max}$ \\
-\hline
-0.5 & 2.773 & 6.094 \\
-1   & 1.592 & 3.320 \\
-2   & 1.038 & 1.899 \\
-4   & 0.781 & 1.204 \\
-8   & 0.621 & 0.853 \\
-\hline
-\end{tabular}
-\end{table}
+Because per-client dataset sizes differ, $\sigma$ differs per client
+(Table~\ref{tab:perround}). The two datasets sit in different regimes: a HAR
+client holds $279$ windows against CIFAR-10's $2000$, so the sampling rate is
+roughly seven times higher, and with the longer budget HAR's convergence
+requires, $\sigma$ at $\varepsilon = 0.5$ reaches $17.5$--$20.6$ against
+$2.8$--$6.1$. Under local DP the round budget is therefore not free:
+extending training to reach convergence raises $\sigma$ for every round.
 
 \subsection{Energy Measurement}
 
-Energy is read from the NVML hardware counter
+Energy comes from the NVML counter
 \texttt{nvmlDeviceGetTotalEnergyConsumption}~\cite{nvml}, which accumulates
-millijoules on the device. We difference the counter before and after each
-round, so the measurement involves no power sampling and no numerical
-integration, and cannot miss a transient. This is a measured quantity, not a
-TDP-based estimate.
+millijoules on the device. Differencing it before and after each round
+involves no power sampling and no integration, and cannot miss a transient.
+This is measured, not estimated from a TDP model.
 
 Measurement is server-side and per round, bracketing \texttt{configure\_train}
-through \texttt{aggregate\_evaluate}. In simulation all clients share one GPU,
-so a round-level window captures the full cost regardless of how the runtime
-schedules client actors; measuring inside each client would double-count
-concurrent work.
+through \texttt{aggregate\_evaluate}. All clients share one GPU in simulation,
+so a round-level window captures the full cost regardless of actor scheduling;
+measuring inside each client would double-count concurrent work.
 
-We report energy both gross and net of an idle baseline. The baseline is
-sampled over a quiet-GPU window before each run: $18.54$~W (sd $0.10$) on our
-hardware. Net energy subtracts this baseline over the wall-clock the counter
-actually covers, which is \emph{not} whole-process wall-clock --- run
-start-up, centralised evaluation between rounds, and teardown fall outside the
-round windows. Subtracting idle over the longer interval would understate net
-compute energy substantially.% VERIFY the exact fraction on this sweep:
-% python -c "import json,glob;rs=[json.load(open(p)) for p in glob.glob('results/run_*.json')];
-%   print(sum(1-r['totals']['wall_s_measured']/r['totals']['wall_s_total'] for r in rs)/len(rs))"
-% then state it: "...and account for roughly N% of process wall-clock."
+We report energy gross and net of an idle baseline, sampled per run after
+waiting for board power to stabilise: a card does not reach its floor when a
+run ends, and probing during that tail reads a busy baseline that understates
+the run's net energy. Baselines are also checked against the sweep median
+($18.21$~W on HAR) and outliers discarded. Net energy subtracts the baseline
+over the wall-clock the counter covers, which excludes start-up, central
+evaluation and teardown.
 
-Repeating each configuration across three seeds gives a measurement noise
-floor of $\pm 4.38$~W ($6.38\%$). We report no effect smaller than this as an
-effect.
+Three seeds per configuration give a measurement noise floor of $\pm 5.43$~W
+($9.46\%$) on HAR and $\pm 4.38$~W ($6.38\%$) on CIFAR-10. No smaller effect
+is reported as an effect. The HAR floor is wider because its rounds last about
+$0.48$~s, too short to average out power fluctuation; whole-run totals are the
+more reliable quantity there.
 
 \subsection{Experimental Controls}
 
-\textbf{Fixed clipping norm.} $C=1.0$ for every $\varepsilon$. Tuning $C$ per
-budget would confound the privacy--utility comparison. Our ablation shows
-$C$ affects convergence substantially while leaving per-round energy
-unchanged, so $C=1.0$ is a conservative rather than optimal choice.
+\textbf{Clipping norm $C = 1.0$ for every $\varepsilon$}, since tuning it per
+budget would confound the comparison.
 
-\textbf{Identical compute across budgets.} The energy axis is only
-interpretable if every $\varepsilon$ condition executes the same workload. We
-verify per round that executed optimiser steps match the steps the accountant
-was calibrated for. Opacus' loader yields exactly $\lceil n/B \rceil$ batches
-per epoch, so step counts are deterministic and independent of
-$\varepsilon$; Poisson sampling randomises batch \emph{size} (approximately
-$\pm 2\%$ of $n$), not step count, and that residual is unbiased with respect
-to $\varepsilon$. Across the sweep, executed and calibrated steps agree to
-within one step per round ($0.16\%$), a floating-point artefact of the
-loader's batch-count computation that runs \emph{fewer} steps than accounted,
-preserving the upper-bound claim.
+\textbf{Identical compute across budgets.} We verify per round that executed
+optimiser steps match those the accountant was calibrated for: on HAR all six
+conditions execute 89 steps per round, and the counts agree exactly.
 
-\textbf{Accountant excluded from the measurement window.} Deriving $\sigma$
-requires a binary search over the RDP accountant whose cost depends strongly
-on the target budget: we measure $0.086$~s at $\varepsilon=0.5$ against
-$0.693$~s at $\varepsilon=8$. Executed inside the federated loop, this cost
-falls within the energy-measurement window and scales with $\varepsilon$,
-producing a wall-clock trend that is indistinguishable in shape from a cost of
-privacy. In our first clean sweep it accounted for the entire measured
-$\varepsilon$ trend (predicted $+18.2$~s at $\varepsilon=8$ relative to
-$\varepsilon=0.5$; measured $+19.7$~s) while step counts stayed flat. We
-therefore derive all $\sigma$ values before measurement begins. We flag this
-as a general hazard for energy studies of privacy mechanisms.
+\textbf{The accountant is excluded from the measurement window.} Its search
+costs $0.086$~s at $\varepsilon = 0.5$ against $0.693$~s at $\varepsilon = 8$,
+so run inside the loop it scales with $\varepsilon$ inside the measured
+window. In our first clean sweep it reproduced the entire observed trend
+(predicted $+18.2$~s at $\varepsilon = 8$ over $\varepsilon = 0.5$; measured
+$+19.7$~s) while step counts stayed flat. All $\sigma$ values are derived
+before measurement begins.
 
-\textbf{Randomised run order.} Sweeping $\varepsilon$ in a fixed order makes
-execution order and $\varepsilon$ rank-correlated ($\rho=-0.99$), so any drift
-over a sweep is inseparable from a privacy effect. We randomise the order of
-all 18 runs, reducing the correlation to $\rho=-0.20$ and making the
-$\varepsilon$ trend attributable.
+\textbf{Randomised run order.} Sweeping $\varepsilon$ in a fixed order leaves
+execution order and $\varepsilon$ correlated at $\rho = -0.99$, so drift over
+a sweep is inseparable from a privacy effect. Randomising reduces this to
+$\rho = -0.20$.
 
-\textbf{Determinism deliberately not enforced.} We do not enable
-\texttt{torch.use\_deterministic\_algorithms}: it forces slower kernel
-selection and would change measured energy, i.e.\ we would be measuring a
-configuration nobody deploys. Reproducibility comes from averaging over seeds.
-Per-client step counts are deterministic; the round-to-round variation in
-aggregate step count comes from client sampling, which we record per round.
+\textbf{Determinism deliberately not enforced.} Enabling deterministic kernels
+would change measured energy, i.e.\ measure a configuration nobody deploys.
+Reproducibility comes from averaging over seeds.
 
 \subsection{Limitations}
 
-Clients are virtual and share a single GPU rather than running on distinct
-devices. Relative comparisons between privacy budgets hold; absolute
-per-device joules do not transfer to real edge hardware. CPU RAPL counters
-were unavailable in our containerised environment, so measurement is GPU-only
-and communication energy is modelled analytically rather than measured. The
-workload does not saturate the device (roughly 68~W on a 360~W card), which is
-why idle-subtracted figures are reported alongside gross ones.
+Clients are virtual and share one GPU, though on HAR each holds one real
+participant's data: relative comparisons hold, absolute per-device joules do
+not transfer. CPU RAPL counters were unavailable, so measurement is GPU-only
+and communication energy is modelled. The workload does not saturate the
+device ($60$--$65$~W on a $360$~W card), which is why net figures accompany
+gross ones.
+
+Two HAR choices are worth stating. Per-channel standardisation constants are
+computed from the training split and are global across clients, so a federated
+deployment would have to agree them without pooling raw data. And the round
+budget is set from the non-private convergence curve, so private conditions
+inherit a longer budget than any of them needs and a correspondingly larger
+$\sigma$; their accuracies are a lower bound on what a per-$\varepsilon$ tuned
+budget would give.

@@ -1,0 +1,81 @@
+% Section V -- Discussion (second cut, for the six-page limit). Every number
+% appears in Section IV. Nothing here restates a number the conclusion needs.
+
+\section{Discussion}
+
+\subsection{Two Costs, Two Remedies}
+
+The fixed per-round overhead is an implementation cost --- per-sample
+gradients and clipping --- and is what a systems contribution can attack,
+through better kernels or amortised clipping. The convergence penalty is
+bounded by the privacy accounting rather than by any implementation, and can
+only be answered through the round budget. An evaluation reporting energy per
+round sees only the first and concludes that privacy costs a flat half again;
+measured against the accuracy a deployment needs, the second is several times
+larger. The third axis therefore does not merely rank configurations, it
+changes which engineering effort is worth spending.
+
+\subsection{Privacy Sets a Quality Ceiling}
+
+The cost of privacy is not a constant multiplier: it is invisible at $0.40$
+accuracy on HAR, $5.8\times$ at $0.70$, and unbounded at $0.85$. Past the
+ceiling a budget implies, the trade is not energy for accuracy but nothing for
+nothing. The usual formulation --- choose $\varepsilon$, then see what utility
+follows --- treats the two as sequential; our results suggest choosing them
+jointly, since a utility-only evaluation reports a lower number without
+indicating whether more computation would fix it.
+
+The mechanism is that the round budget is part of the privacy budget. Every
+round a client participates in consumes budget, so $\sigma$ is fixed before
+training by a decision federated learning usually treats as free: on HAR,
+extending from 30 to 100 rounds --- which the non-private model needs ---
+raises $\sigma$ at $\varepsilon = 0.5$ from $10.2$ to $18.4$. Training to
+convergence is self-defeating, because the extension is what prevents
+convergence. A stopping rule follows. We state it conditionally, since HAR
+reproduces it only at its tightest budget while CIFAR-10 reproduces it across
+four; what generalises is the direction, not the ordering.
+
+\subsection{When the Model Is Noise-Limited, Tuning Is Not the Lever}
+
+Our HAR ablations are negative and useful. At $\varepsilon = 1$ neither local
+epochs nor the clipping norm moves accuracy by more than $3\%$ against a
+$9.46\%$ floor, so a practitioner responding to a disappointing private model
+by sweeping hyperparameters will spend considerable energy to land where they
+started. This does not hold in every regime, and CIFAR-10 shows why: there the
+private model retains more signal and the same settings can be got badly
+wrong. Increasing local work per round is the standard way to reduce
+communication in federated learning; under DP it stops paying on HAR and
+actively harms on CIFAR-10, because local steps enter the budget and force a
+larger $\sigma$.
+
+\subsection{Where the Computation Runs}
+
+Measured in joules, the cost inherits the carbon intensity of wherever they
+are drawn: an $18.8\times$ range between Algeria's grid and Norway's for
+identical computation and an identical guarantee. The point is sharper for
+federated learning than for centralised training, because the computation
+sits on whatever grids the participating devices do and no operator chooses
+them. A deployment cannot relocate the way a data centre can; what it can
+adjust is how much computation the privacy requirement demands.
+
+\subsection{Measuring Energy Around a Privacy Accountant}
+
+Instrumentation attached to a privacy mechanism tends to scale with the
+privacy parameter, so its cost mimics the effect under study. The accountant's
+noise-calibration search is the case we hit: run inside the federated loop it
+reproduced our entire observed $\varepsilon$ trend while executed step counts
+stayed flat, and nothing in the resulting numbers announces this. We recommend
+three controls: derive noise multipliers before measurement begins, verify per
+round that executed and calibrated step counts agree, and randomise run order
+so that drift over a sweep cannot be mistaken for an $\varepsilon$ effect.
+
+\subsection{Threats to Validity}
+
+Clients are virtual and share one GPU, so the ratios transfer to real devices
+but the absolute joules do not; confirming them on physical hardware is the
+immediate next step. Measurement is GPU-only and communication energy is
+modelled --- for a $0.15$--$0.24$~MB model over tens of rounds we expect it
+small, but have not shown it. Two datasets bound the effects rather than
+establishing them. And our accounting claims no amplification by subsampling,
+so the reported $\varepsilon$ is an upper bound: these are the costs under the
+weakest trust assumptions, not the best achievable.
