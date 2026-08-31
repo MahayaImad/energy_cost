@@ -1,0 +1,87 @@
+% Section I -- Introduction.
+%
+% NOVELTY CLAIMS: the phrases "to our knowledge" below need checking against
+% the literature before submission. Verify specifically whether any prior work
+% measures the energy of DP-FL rather than modelling it, and whether the
+% per-round / convergence decomposition has been made elsewhere. Soften or
+% drop the claims that do not survive that check -- a reviewer who knows one
+% counterexample will discount the rest of the paper.
+% Citation keys are placeholders: \cite{dpsgd}, \cite{fedavg}, \cite{opacus},
+% \cite{flower}, \cite{greenai}, \cite{strubell}, \cite{rdp}, \cite{uci-har}.
+
+\section{Introduction}
+
+Differential privacy in federated learning is evaluated almost exclusively
+along two axes. A privacy budget $\varepsilon$ is chosen, the resulting
+accuracy is reported, and the trade-off between them is the result. The
+literature on DP-SGD~\cite{dpsgd} and its federated variants has made that
+trade-off precise, and tooling such as Opacus~\cite{opacus} has made it
+routine to measure.
+
+A third axis is missing. Training consumes energy, and adding differential
+privacy changes how much. On the battery-powered edge devices that federated
+learning exists to serve, energy is not a secondary consideration to be
+optimised after the fact --- it decides whether a deployment is possible at
+all. A privacy configuration that a phone cannot afford to run is not a point
+on the privacy--utility curve; it is off the curve entirely.
+
+Green AI research has established that the energy and carbon costs of machine
+learning deserve first-class measurement~\cite{greenai, strubell}, but that
+work has concentrated on large centralised training. The intersection ---
+what privacy costs in joules, in a federated setting --- has not, to our
+knowledge, been measured directly.
+
+This paper measures it, and reports three findings that a two-axis evaluation
+cannot produce.
+
+\textbf{The dominant cost of privacy is convergence, not arithmetic.} Adding
+differential privacy imposes a fixed per-round overhead from per-sample
+gradient computation and clipping: we measure $+45\%$ on UCI-HAR and $+60\%$
+on CIFAR-10, and this overhead does not vary with $\varepsilon$ within our
+measurement resolution. It is the visible cost, and it is the smaller one.
+Everything that depends on the privacy budget acts instead through the number
+of rounds required, which an energy-per-round evaluation cannot see. The two
+mechanisms have opposite engineering implications: a fixed overhead is
+addressed by optimising the DP implementation, a convergence penalty by
+changing the round budget.
+
+\textbf{The cost grows with the accuracy demanded, and becomes unbounded.} On
+HAR the private and non-private conditions cost the same energy to reach
+$0.40$ accuracy, $1.2$--$2.1\times$ to reach $0.50$, and $5.8\times$ to reach
+$0.70$, with the tighter budgets never arriving. At $0.85$ accuracy, which the
+non-private model reaches comfortably, no privacy budget we tested arrives at
+any energy expenditure. A privacy budget therefore implies a ceiling on
+achievable model quality, past which additional computation buys nothing ---
+because under client-level accounting the additional training is itself what
+raises the noise.
+
+\textbf{The same privacy budget carries very different carbon costs.} Because
+the cost is paid in joules, it inherits the carbon intensity of the grid
+supplying them. The privacy premium on 1000 HAR training runs is
+$105$--$133$~gCO$_2$eq on Algeria's gas-dominated grid against $5.6$--$7.1$~g
+in Norway. Selecting $\varepsilon$ is in part a geographic decision, which the
+privacy--utility framing has no way to express.
+
+We measure energy with NVML hardware counters differenced around each
+federated round, rather than estimating it from device power ratings as much
+Green AI work does. Two datasets are used. UCI-HAR~\cite{uci-har} is primary:
+its clients are the individual volunteers the data was collected from, so the
+federation's client boundary is a real person rather than a synthetic
+partition --- an arrangement that matters for a study about protecting
+individuals' data, and one that places the work in the sensor-on-edge setting
+where these deployments live. CIFAR-10 is secondary and checks the same
+effects on a harder benchmark.
+
+A methodological contribution follows from the measurement itself. Deriving
+the noise multiplier requires a search over the privacy accountant, and that
+search costs more for a loose budget than a tight one. Executed inside the
+federated loop, where the natural implementation puts it, its cost lands
+inside the measurement window and scales with $\varepsilon$ --- taking exactly
+the shape of a cost of privacy. In our first clean sweep it accounted for the
+entire observed trend. We describe this artefact and the three controls that
+remove it, because any energy study of a privacy mechanism is exposed to it.
+
+The rest of the paper is organised as follows. Section~II reviews related
+work. Section~III describes the accounting model, the energy measurement and
+the experimental controls. Section~IV reports results on both datasets.
+Section~V discusses the implications, and Section~VI concludes.
