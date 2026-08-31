@@ -407,6 +407,24 @@ def check(by_eps, runs=None) -> bool:
         else:
             print("    ok: all baselines within tolerance of the median")
 
+    # Very short rounds sit near the limit of what a bracketed counter can
+    # resolve: GPU power swings over tens of milliseconds, and a round lasting
+    # a fraction of a second averages almost none of that away. The energy is
+    # still measured correctly, it is just a noisier estimate of the round's
+    # cost, which inflates the noise floor and with it the smallest effect the
+    # study can claim.
+    print("\n[3c] Round duration against measurement resolution")
+    durs = [rd["wall_s"] for r in (runs or []) for rd in r["rounds"]]
+    if durs:
+        mean_d = float(np.mean(durs))
+        per_round = [rd["energy_j"] for r in (runs or []) for rd in r["rounds"]]
+        swing = 100 * (max(per_round) - min(per_round)) / float(np.mean(per_round))
+        print(f"    mean round {mean_d:.2f} s, per-round energy spread {swing:.0f}% of mean")
+        if mean_d < 1.0:
+            print("    WARNING: rounds under 1 s. Per-round energy is a noisy")
+            print("             estimate here; prefer whole-run totals, and read")
+            print("             the noise floor below as the real resolution.")
+
     w, pct = noise_floor(by_eps)
     print(f"\n[4] Measurement noise floor: +/-{w:.2f} W ({pct:.2f}%)")
     print("    No effect smaller than this is resolvable. State it before")
