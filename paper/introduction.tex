@@ -1,8 +1,8 @@
 % Section I -- Introduction (condensed to fit IEEE 6 pages).
-% NOVELTY: check the "to our knowledge" claim against the literature before
-% submission and soften it if any prior work measures DP-FL energy directly.
-% Citations are placeholders: \cite{dpsgd}, \cite{opacus}, \cite{flower},
-% \cite{greenai}, \cite{strubell}, \cite{uci-har}.
+% The "to our knowledge" novelty claim that stood here has been withdrawn:
+% Schwermer et al. measured DP-FL energy on a physical testbed in 2023. The
+% claim is now about sweeping epsilon and reporting energy-to-target, which
+% Section II defends.
 
 \section{Introduction}
 
@@ -16,9 +16,13 @@ exists to serve, energy decides whether a deployment is possible at all. A
 privacy configuration a phone cannot afford to run is not a point on the
 privacy--utility curve; it is off the curve. Green AI research has established
 that energy and carbon deserve first-class measurement~\cite{greenai,
-strubell}, but has concentrated on large centralised training. What privacy
-costs in joules, in a federated setting, has to our knowledge not been
-measured directly.
+strubell}, but has concentrated on large centralised training. Federated work
+on the energy of differential privacy has mostly minimised it analytically
+under a guarantee taken as fixed~\cite{chen, zhang}; where it has been
+measured on real hardware, it has been at a single privacy
+setting~\cite{schwermer}. The shape of the cost as $\varepsilon$ varies ---
+which is what a designer needs in order to choose a budget --- is what we
+measure here.
 
 We measure it with NVML hardware counters differenced around each federated
 round, rather than estimating from device power ratings, and report three

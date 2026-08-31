@@ -1,0 +1,62 @@
+% Section II -- Related Work.
+% Positioning: prior work either optimises energy under a DP constraint
+% analytically, or measures one privacy setting. Neither sweeps epsilon with
+% hardware counters, and none reports energy-to-target-accuracy.
+
+\section{Related Work}
+
+\subsection{Measuring the energy of training}
+
+Green AI made energy and carbon reportable quantities rather than
+externalities~\cite{greenai, strubell}, and a family of tools now estimates
+them from utilisation traces and grid factors~\cite{henderson, carbontracker,
+lacoste}. Comparisons of those tools against instrumented hardware find the
+estimates diverge substantially from measurement~\cite{bouza,
+aquinobritez}, which is why we read NVML counters rather than model power
+from device ratings. Patterson et al.~\cite{patterson} established that
+where a job runs changes its emissions by $5$--$10\times$; our geographic
+result is that finding applied to a parameter, $\varepsilon$, rather than to
+a schedule. Savazzi et al.~\cite{savazzi} give an analytical energy and
+carbon framework for federated and decentralised learning, but without a
+privacy mechanism.
+
+\subsection{Energy and differential privacy in federated learning}
+
+One line of work treats DP noise as a constraint inside a wireless
+resource-allocation problem and minimises device energy under it, either by
+harvesting channel noise as the privacy mechanism~\cite{liu, zhang, mao} or
+by co-designing compression with the noise
+budget~\cite{chen, ding}. Energy there is an optimisation objective evaluated
+through a convergence bound; it is not measured, and $\varepsilon$ is a
+constraint rather than a swept variable. Closest to us empirically,
+Schwermer et al.~\cite{schwermer} built a physically distributed edge testbed
+and reported traffic, energy and training time for a CNN on MNIST with
+differential privacy enabled, and found software estimates deviating by up to
+$35\%$ from measurement. Their contrast is DP on versus off at one setting;
+ours is the shape of the cost across the budget. Aroussi
+et al.~\cite{aroussi} schedule $\varepsilon$ adaptively on Raspberry Pi and
+ESP32 nodes and report a $20$--$25\%$ energy improvement over a fixed-privacy
+baseline --- the gain of a controller, rather than the cost curve a designer
+would need to choose the budget in the first place.
+
+\subsection{Rounds as the mechanism}
+
+That the cost should act through the round count is known analytically. Wei
+et al.~\cite{nbafl} prove that under client-level DP there is an optimal
+number of aggregations for a given protection level, beyond which
+convergence degrades, and later derive a discounting method to find
+it~\cite{weicdp}; the same optimum reappears for personalised
+FL~\cite{weipfl}, for query and reply counts~\cite{zhou}, and in control
+formulations that adapt noise and rounds jointly~\cite{yuan}. These results
+say where to stop. What they do not say is what continuing costs, because
+the round is an abstract unit in them. Our measurements price it: at
+$\varepsilon = 0.5$ on UCI-HAR, $83\%$ of a run's joules are spent after the
+accuracy peak that this literature predicts.
+
+\subsection{Our position}
+
+We therefore contribute the missing empirical axis: hardware-counter energy
+swept across $\varepsilon$ under whole-run client-level
+accounting~\cite{dpsgd, geyer}, decomposed into a fixed per-round overhead
+and a convergence penalty, and reported as energy-to-target-accuracy rather
+than energy per round or energy per run.
