@@ -4,7 +4,9 @@
 %   HAR:      `python analyze.py results_har/` and the same with
 %             `--targets 0.40,0.50,0.85`, on the 18-run sweep at 100 rounds.
 %   CIFAR-10: `python analyze.py results/` on the 18-run sweep at 30 rounds.
-%   Ablations: CIFAR-10 only; the HAR grid (epochs, clip) is running.
+%   Ablations: both datasets, three seeds per cell.
+%     HAR   -- `python analyze.py results_ablation_har/ --ablation`
+%     CIFAR -- `python analyze.py results_ablation/ --ablation`
 % Regenerate and update this file rather than editing values by hand.
 %
 % NOTE: an earlier draft led on a "9.5x earlier stopping round under privacy"
@@ -177,44 +179,60 @@ is that both datasets agree on the shape of both effects.
 
 \subsection{Ablations}
 
-% TODO: HAR ablations (epochs, clip; three seeds, 100 rounds) are running.
-% Fill from `python analyze.py results_ablation_har/ --ablation`.
-% The alpha axis does not exist on HAR: the partition is fixed by which
-% volunteer contributed the data.
+We vary one factor at a time at $\varepsilon \in \{1, \infty\}$, holding the
+others at the configuration of Section~III, with three seeds per cell. On HAR
+only local epochs and the clipping norm are meaningful: a client there is a
+study participant, so the federation size is fixed by the split and there is
+no Dirichlet parameter to vary.
 
-We vary one factor at a time at $\varepsilon \in \{1, \infty\}$ on CIFAR-10,
-holding the others at the configuration of Section~III.
+\textbf{Under a tight budget the model becomes noise-limited.} This is the
+clearest reading of the HAR ablations and it is a negative result worth
+stating. At $\varepsilon=1$, neither factor moves accuracy: final accuracy
+spans $0.5427$--$0.5573$ across one, two and five local epochs ($2.6\%$ of the
+mean) and $0.5534$--$0.5660$ across $C \in \{0.5, 1, 2\}$ ($2.3\%$), both
+comfortably inside the $9.46\%$ noise floor. With $\sigma$ between $9.2$ and
+$10.9$, the injected noise dominates whatever these settings contribute, and
+tuning them is not a route to a better private model.
 
-\textbf{Local epochs invert under privacy.} Increasing local work per round is
-the standard way to reduce communication rounds in federated learning. Without
-privacy it is close to accuracy-neutral here ($0.514$, $0.552$, $0.525$ for
-one, two and five local epochs) while raising energy per round by $3.5\times$.
-Under $\varepsilon=1$ it is harmful on both axes: accuracy falls from $0.181$
-to $0.129$ to $0.101$, the peak round collapses from 13 to 6 to 3, and energy
-per round rises from $164$~J to $585$~J. The accounting model explains this
-directly: local steps enter $s_{\text{total}}$, so additional local epochs
-consume budget faster and force a larger $\sigma$ for the same $\varepsilon$.
-The two costs compound, since a configuration that spends more per round also
-reaches its own peak sooner.
+\textbf{The standard efficiency lever stops paying under privacy.} Increasing
+local work per round is how federated learning ordinarily buys fewer
+communication rounds, and on HAR without privacy it works: energy to reach
+$0.70$ accuracy falls from $304$~J at one local epoch to $192$~J at five, a
+$1.6\times$ saving, while accuracy is unchanged within noise. Under
+$\varepsilon=1$ that saving disappears entirely --- the target is not reached
+at any epoch count --- while energy per round still rises from $29$~J to
+$64$~J, a factor of $2.2$. The practitioner pays the compute and receives
+nothing, because local steps enter $s_{\text{total}}$: more local work per
+round consumes budget faster and forces a larger $\sigma$ for the same
+$\varepsilon$, cancelling the convergence gain it would otherwise buy.
 
-\textbf{Clipping norm trades accuracy against target.} At $\varepsilon=1$,
-energy per round is unchanged by $C$ ($167$, $164$, $165$~J for $C \in \{0.5,
-1, 2\}$, well within the noise floor), so $C$ acts purely on convergence.
-Tighter clipping gives higher final accuracy ($0.206$ against $0.117$ at
-$C=2$) and a later peak (round 18 against 6). The cheapest route to a
-\emph{low} target is loose clipping --- $C=2$ reaches $0.20$ in $940$~J
-against $1725$~J at $C=0.5$ --- but it then collapses, so that figure is only
-meaningful together with the stopping round. The optimal clipping norm depends
-on the accuracy target, and our fixed $C=1.0$ is a conservative choice rather
-than an optimal one.
+\textbf{On a harder task the lever inverts rather than merely failing.} The
+CIFAR-10 ablations, where the private model operates much closer to chance,
+show the same mechanism pushed further. At $\varepsilon=1$ accuracy falls from
+$0.178$ to $0.134$ to $0.101$ across one, two and five local epochs, a $56\%
+$ spread against a $6.38\%$ floor, the peak round collapses from 13 to 6 to 4,
+and energy per round rises from $153$~J to $570$~J. The two costs compound: a
+configuration that spends more per round also reaches its own peak sooner, so
+energy spent after the peak grows from $2596$~J to $14819$~J, and at five
+epochs the $0.20$ target is never reached at all.
 
-\textbf{Heterogeneity is masked by noise.} Without privacy, partition skew
-behaves as expected: accuracy $0.397$, $0.509$, $0.547$ for $\alpha \in \{0.1,
-0.5, 10\}$, and reaching $0.20$ costs $1.5\times$ more energy at $\alpha=0.1$
-than at $\alpha=10$. Under $\varepsilon=1$ the ordering is not stable across
-seeds, which we read as DP noise dominating the effect of heterogeneity rather
-than as evidence of a direction. This axis does not arise on HAR, where the
-partition is fixed by which volunteer contributed the data.
+\textbf{Clipping is free in compute and matters only where the model is not
+noise-limited.} On both datasets $C$ leaves energy per round unchanged
+($29$~J across all three values on HAR; $144$--$183$~J on CIFAR-10, inside the
+floor), so it acts purely on convergence. On HAR it does not act at all, for
+the reason above. On CIFAR-10 it acts strongly and in a way that final
+accuracy alone hides: $C=2$ peaks at $0.191$ at round 8 and ends at $0.102$,
+giving back $46.5\%$ of its peak, against $3.1\%$ at $C=0.5$. Loose clipping
+therefore reaches nearly the same quality as tight clipping and then loses it,
+which is only visible if the peak is reported alongside the final value. Our
+fixed $C=1.0$ is a conservative choice rather than an optimal one, and on
+CIFAR-10 every private result would improve at $C=0.5$.
+
+Taken together the ablations bound where hyperparameter tuning helps. Where
+the private model retains useful signal, as on CIFAR-10, the settings matter
+and can be got badly wrong. Where the noise dominates, as on HAR at
+$\varepsilon=1$, they do not matter at all, and the only levers left are the
+privacy budget and the round budget.
 
 \subsection{Carbon Cost by Grid}
 
