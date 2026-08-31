@@ -706,10 +706,25 @@ def ablations(runs):
     read off them is how the cost of privacy responds to a deployment choice:
     energy-to-target under DP versus the same configuration without it.
     """
-    base = {"dirichlet_alpha": 0.5, "num_supernodes": 20, "local_epochs": 1,
-            "clipping_norm": 1.0}
+    # The baseline configuration is READ FROM THE DATA, not assumed. Each
+    # ablation varies one factor and holds the rest at baseline, so the
+    # baseline value of every factor is the one appearing in the most runs.
+    #
+    # Hardcoding it broke HAR silently: the CIFAR baseline has 20 supernodes,
+    # HAR has 21, so the "all other factors at baseline" filter rejected every
+    # run and both tables came out empty with their headers intact.
+    from collections import Counter
 
-    print("\n    'lost' is accuracy given back between the peak and round 30;")
+    base = {}
+    for k in ABLATION_FACTORS:
+        vals = [r["config"].get(k) for r in runs if r["config"].get(k) is not None]
+        if vals:
+            base[k] = Counter(vals).most_common(1)[0][0]
+    print(f"\n    baseline read from the data: "
+          + ", ".join(f"{ABLATION_FACTORS[k]}={v}" for k, v in base.items()))
+
+    nr = min((len(r["rounds"]) for r in runs), default=0)
+    print(f"    'lost' is accuracy given back between the peak and round {nr};")
     print("    'wasted J' is the energy spent getting there.")
     print("\n    (* = single seed: below the ~6% noise floor nothing under")
     print("     roughly 10% is resolvable. Re-run an axis with three seeds")
