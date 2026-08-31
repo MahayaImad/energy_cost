@@ -1,0 +1,163 @@
+% Section V -- Discussion. Draws implications from Section IV; every number
+% quoted here appears there with its provenance. Citation keys are
+% placeholders: \cite{opacus}, \cite{dpsgd}, \cite{greenai}, \cite{codecarbon}.
+
+\section{Discussion}
+
+\subsection{Two Costs, Two Remedies}
+
+The energy cost of differential privacy separates into a fixed per-round
+overhead and a convergence penalty, and the two call for different responses.
+
+The overhead is an implementation cost: per-sample gradient computation and
+gradient clipping, paid identically whether the budget is tight or loose. We
+measure it at $+45\%$ on HAR and $+60\%$ on CIFAR-10, flat in $\varepsilon$
+within the noise floor of both. It is the part a systems contribution can
+attack --- through better per-sample gradient kernels, or by amortising the
+clipping --- and the part that scales down as those implementations improve.
+
+The convergence penalty is not addressable that way. It arises because a
+noisier update carries less information, so more rounds are needed for the
+same accuracy, and it is bounded by the privacy accounting rather than by any
+implementation. Reporting energy per round, as an efficiency-focused
+evaluation naturally would, sees only the first cost and concludes that
+privacy is a flat surcharge of roughly half again. Measured against the
+accuracy a deployment actually needs, the second cost is several times larger.
+This is the practical reason the third axis is worth adding: it does not
+merely rank configurations, it changes which engineering effort is worth
+spending.
+
+\subsection{Privacy Sets a Quality Ceiling, Not Just a Price}
+
+The more consequential finding is that the cost of privacy is not a constant
+multiplier. On HAR it is invisible at $0.40$ accuracy, where every condition
+costs the same within noise; it is $1.17$--$2.10\times$ at $0.50$; it is
+$5.8\times$ at $0.70$, with $\varepsilon \le 2$ never arriving; and at $0.85$,
+which the non-private model reaches in $878$~J, no budget we tested arrives at
+any expenditure.
+
+A privacy budget therefore implies a maximum achievable accuracy, and past
+that point the trade is not energy for accuracy but nothing for nothing. This
+reframes budget selection. The usual formulation --- choose $\varepsilon$,
+then see what utility follows --- treats the two as sequential. Our results
+suggest choosing them jointly: a deployment that needs $0.85$ activity
+recognition accuracy cannot have $\varepsilon = 1$ under this accounting, and
+discovering that after provisioning hardware is expensive. The energy axis is
+what makes the ceiling visible, because a utility-only evaluation reports a
+lower number without indicating whether more computation would fix it.
+
+\subsection{The Round Budget Is Part of the Privacy Budget}
+
+Under client-level local DP the number of rounds enters the accounting
+directly: every round a client participates in consumes budget, so $\sigma$ is
+fixed before training starts by a decision that federated learning usually
+treats as a free parameter. On HAR, extending the budget from 30 to 100 rounds
+--- which the non-private model needs, reaching $95\%$ of its final accuracy
+only at round 59 --- raises $\sigma$ at $\varepsilon=0.5$ from $10.2$ to
+$18.4$. Training to convergence is self-defeating: the extension is what
+prevents convergence.
+
+The consequence is a stopping rule. Under a sufficiently tight budget the
+accuracy curve peaks and declines, and training past the peak spends energy
+while losing accuracy. At $\varepsilon=0.5$ on HAR, $83\%$ of the run's energy
+falls after the peak. CIFAR-10 shows the effect across more budgets, with the
+peak round ordering monotonically from 7 to 24 as $\varepsilon$ loosens.
+
+We state this conditionally, since HAR reproduces it only at its tightest
+budget while CIFAR-10 reproduces it across four. The mechanism is the same in
+both --- accumulated noise eventually dominates the aggregated update --- but
+where the crossover falls relative to the round budget depends on the task,
+and one of our two datasets does not exhibit it at $\varepsilon \ge 1$. What
+generalises is the direction: the round budget should be derived from the
+privacy budget, and a deployment that sizes it from the non-private
+convergence curve risks paying for rounds that make the model worse.
+
+\subsection{When the Model Is Noise-Limited, Tuning Is Not the Lever}
+
+Our HAR ablations are negative and useful. At $\varepsilon=1$, neither the
+number of local epochs nor the clipping norm moves accuracy: both span under
+$3\%$ against a $9.46\%$ noise floor. With $\sigma$ near $10$, the injected
+noise dominates what these settings contribute.
+
+The practical reading is that hyperparameter search is a poor use of compute
+in this regime. A practitioner who responds to a disappointing private model
+by sweeping learning rates, clipping norms and local epochs will spend
+considerable energy to land within noise of where they started. The levers
+that remain are the privacy budget and the round budget.
+
+This does not generalise to every regime, and CIFAR-10 shows why. There the
+private model retains more signal, the same settings matter a great deal, and
+they can be got badly wrong: five local epochs costs $3.7\times$ the energy per
+round and loses $43\%$ of the accuracy that one epoch achieves, while
+post-peak waste grows from $2596$~J to $14819$~J. Increasing local work per
+round is the standard way to reduce communication in federated learning; under
+DP it stops paying on HAR and actively harms on CIFAR-10, because local steps
+enter the budget and force a larger $\sigma$. The boundary between the two
+regimes --- where noise begins to dominate tuning --- is worth characterising
+and we have only bracketed it.
+
+\subsection{Where the Computation Runs}
+
+Because the cost of privacy is measured in joules, it inherits the carbon
+intensity of wherever those joules are drawn. The same $\varepsilon$, bought
+with the same computation, costs $105$--$133$~gCO$_2$eq per 1000 HAR training
+runs on Algeria's gas-dominated grid and $5.6$--$7.1$~g in Norway, a factor of
+$18.8$.
+
+Privacy budget selection is therefore partly a siting decision, which the
+privacy--utility framing has no place for. Two deployments with identical
+regulatory requirements and identical models carry environmental costs an
+order of magnitude apart. For federated learning specifically the point is
+sharper than for centralised training, since the computation is distributed
+across wherever the participating devices happen to be, and no single operator
+chooses the grid. A deployment cannot straightforwardly relocate its
+computation to a cleaner grid the way a data centre operator can; what it can
+adjust is how much computation the privacy requirement demands.
+
+\subsection{Measuring Energy Around a Privacy Accountant}
+
+One methodological result deserves separate statement because it would affect
+any study of this kind.
+
+Deriving $\sigma$ requires a search over the privacy accountant, and that
+search costs more for a loose budget than a tight one: we measure $0.086$~s at
+$\varepsilon=0.5$ against $0.693$~s at $\varepsilon=8$. Run inside the
+federated loop, as the natural implementation does since each client needs its
+own $\sigma$, this cost falls inside the energy-measurement window and scales
+with $\varepsilon$. It is then indistinguishable in shape from a cost of
+privacy. In our first clean sweep it accounted for the entire observed
+wall-clock trend: predicted $+18.2$~s at $\varepsilon=8$ relative to
+$\varepsilon=0.5$, measured $+19.7$~s, while executed step counts stayed flat.
+
+The general hazard is that instrumentation attached to the privacy mechanism
+scales with the privacy parameter, so its cost mimics the effect under study.
+An evaluation that measures wall-clock or energy around a privacy accountant
+will find the accountant's own cost scaling with the budget, and nothing in
+the resulting numbers announces that. We derive all $\sigma$ values before
+measurement begins, verify per round that executed and calibrated step counts
+agree, and randomise run order so that drift over a sweep cannot be mistaken
+for an $\varepsilon$ effect --- sweeping $\varepsilon$ in a fixed order leaves
+the two correlated at $\rho = -0.99$. We recommend all three for future work
+on the energy of privacy mechanisms.
+
+\subsection{Threats to Validity}
+
+Clients are virtual and share one GPU. Relative comparisons between privacy
+budgets hold, but absolute per-device joules do not transfer to real edge
+hardware, and confirming the ratios on physical devices is the natural next
+step. Measurement is GPU-only, since CPU RAPL counters were unavailable in our
+environment, and communication energy is modelled rather than measured; for a
+$0.15$--$0.24$~MB model over tens of rounds we expect it to be small relative
+to computation, but we have not shown that.
+
+Two datasets bound the effects rather than establishing them. The per-round
+overhead and the quality ceiling appear on both; the stopping round and the
+hyperparameter sensitivity appear on one each. Whether the boundary between
+those regimes is set by task difficulty, by $\sigma$, or by the ratio between
+them is open.
+
+Finally, our accounting claims no amplification by subsampling, so the
+reported $\varepsilon$ is an upper bound. A deployment with secure aggregation
+or a shuffler would obtain the same utility at a smaller reported budget, and
+the energy figures here should be read as the cost of privacy under the
+weakest trust assumptions rather than the best achievable.
