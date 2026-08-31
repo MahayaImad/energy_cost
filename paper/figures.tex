@@ -1,15 +1,20 @@
-% Figure environments. The PNGs are written by `python analyze.py results/`
-% into results/; copy them next to the .tex or adjust \graphicspath.
-% Place each figure near its first reference in Section IV.
+% Figure environments. All three are the UCI-HAR sweep, to match Section IV.
+% Regenerate with `python analyze.py results_har/`, which writes the PNGs into
+% results_har/; copy them beside main.tex (graphicspath is ./ only, on purpose
+% -- results/ holds identically named CIFAR-10 figures).
+% Inputted before Section IV in main.tex: floats only move forward.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{fig1_convergence.png}
-\caption{Central test accuracy against communication round for each privacy
-budget, means over three seeds with $\pm 1$ SD bands. Markers indicate the
-energy-optimal stopping round for conditions whose accuracy declines after its
-peak. Tighter budgets peak earlier and lower; at $\varepsilon \le 2$ the curve
-falls once accumulated noise dominates the aggregated update.}
+\caption{Central test accuracy against communication round on UCI-HAR over
+100 rounds, means of three seeds with $\pm 1$ SD bands. The marker is the
+energy-optimal stopping round, drawn only where accuracy ends more than half
+a point below its peak: here $\varepsilon = 0.5$ alone, peaking at $0.4712$ at
+round 17 and ending at $0.4553$. The remaining budgets are still flat or
+rising at round 100, so the peak ordering CIFAR-10 shows across budgets does
+not reproduce here; what does is that a tight enough budget makes further
+rounds cost energy and accuracy together.}
 \label{fig:convergence}
 \end{figure}
 
@@ -19,21 +24,24 @@ falls once accumulated noise dominates the aggregated update.}
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{fig3_energy_per_round.png}
-\caption{Energy per round by privacy budget, with the non-private baseline in
-grey. The private conditions are flat within the $6.38\%$ measurement noise
-floor and sit a fixed step above the baseline. This separates the two
-mechanisms: the step is an implementation overhead independent of
-$\varepsilon$, so every budget-dependent cost acts through the round count.}
+\caption{Energy per round on UCI-HAR by privacy budget, net of idle, with the
+non-private baseline in grey and $\pm 1$ SD over three seeds. Private training
+costs $21.0$~J per round against $14.5$~J, an overhead of $+45\%$, and varies
+by $8.2\%$ of its mean across the five private conditions --- inside the
+$9.46\%$ measurement noise floor. This separates the two mechanisms: the step
+is an implementation overhead independent of $\varepsilon$, so every
+budget-dependent cost acts through the round count.}
 \label{fig:perround}
 \end{figure}
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{fig4_carbon.png}
-\caption{Emissions for 1000 training runs of the identical workload across
-grid carbon intensities. The vertical distance between a private curve and the
-non-private one is the carbon attributable to privacy: $228$~gCO$_2$eq on
-Algeria's gas-dominated grid against $12$~g in Norway, a factor of $18.8$ for
-the same computation and the same guarantee.}
+\caption{Emissions for 1000 UCI-HAR training runs of the identical measured
+workload, across six grid carbon intensities. The vertical distance between a
+private curve and the non-private one is the carbon attributable to privacy:
+$105$--$133$~gCO$_2$eq on Algeria's gas-dominated grid against
+$5.6$--$7.1$~g in Norway, a factor of $18.8$ for the same computation and the
+same guarantee.}
 \label{fig:carbon}
 \end{figure}

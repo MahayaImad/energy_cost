@@ -4,8 +4,8 @@
 %
 % BEFORE SUBMISSION
 %   - fill in the author block below (affiliation is a placeholder)
-%   - copy the PNGs written by `python analyze.py results_har/` into this
-%     directory, or point \graphicspath at wherever they live
+%   - copy the three PNGs written by `python analyze.py results_har/` into
+%     this directory (fig1_convergence, fig3_energy_per_round, fig4_carbon)
 %   - check IEEEtran.cls and IEEEtran.bst are on the path (texlive-publishers)
 
 \documentclass[conference]{IEEEtran}
@@ -20,9 +20,6 @@
 % Deliberately only the local directory. analyze.py writes identically named
 % PNGs into results_har/ and results/, so listing both here would silently
 % pick one set. Copy the set you mean beside main.tex.
-% NOTE: the captions in figures.tex describe the CIFAR-10 run (6.38\% noise
-% floor, 228/12 gCO2eq) while Section IV is HAR-primary -- regenerate from
-% results_har/ and update them, or relabel those figures as CIFAR-10.
 \graphicspath{{./}}
 
 \begin{document}
