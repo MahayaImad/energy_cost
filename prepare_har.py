@@ -108,10 +108,11 @@ def main():
     print(f"  test  {Xte.shape}  subjects {sorted(np.unique(ste).tolist())}")
     print(f"  classes {N_CLASSES}, window {WINDOW}, channels {len(SIGNALS)}")
     print("\n  windows per training subject "
-          f"(these become client partition sizes):")
+          "(these become client partition sizes):")
     cnt = [int((str_ == s).sum()) for s in np.unique(str_)]
     print(f"    n = {min(cnt)}..{max(cnt)}, mean {sum(cnt)/len(cnt):.0f}")
-    print("  Re-derive sigma for these sizes: python prewarm_sigma.py --dataset har")
+    print("  Re-derive sigma for these sizes:\n"
+          "    python prewarm_sigma.py --dataset har --rounds <num-server-rounds>")
 
     # Class coverage per client. UCI-HAR records the six activities in blocks,
     # so any partitioning that cuts a participant's recording by position
@@ -127,8 +128,7 @@ def main():
         bad = 0
         n_clients = len(np.unique(str_))
         for pid in range(n_clients):
-            tl, vl = load_partition(pid, n_clients, 32, 0.5, 0,
-                                    dataset="har", har_split="official")
+            tl, vl = load_partition(pid, n_clients, 32, 0.5, 0, dataset="har")
             ctr = set(tl.dataset.y.tolist())
             cva = set(vl.dataset.y.tolist())
             if len(ctr) < N_CLASSES or len(cva) < N_CLASSES:

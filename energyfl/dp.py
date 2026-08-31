@@ -1,62 +1,28 @@
-"""Differential privacy: noise calibration and DP-SGD training.
+"""Noise calibration and DP-SGD training.
 
-ACCOUNTING MODEL (state this verbatim in the paper's methodology)
-----------------------------------------------------------------
-We enforce *client-level local DP*: each client holds its own (epsilon,
-delta) budget over the entire federated run, and the server is untrusted.
+We enforce client-level local DP with an untrusted server: each client holds
+its own (epsilon, delta) budget over the whole federated run, accounted over
+every local SGD step it takes in every round it joins -- not per round, and
+not per epoch. For a client with n local training examples,
 
-The budget is accounted over ALL local SGD steps the client takes across
-ALL rounds in which it participates -- not per round, and not per local
-epoch. This is the conservative choice and the one reviewers check first.
+    total_steps = num_rounds * fraction_train * local_epochs * ceil(n / B)
 
-For a client with n local training examples:
+The RDP accountant is inverted once, before training, to find the sigma that
+spends exactly epsilon after total_steps. Sigma is then constant for the run.
 
-    steps_per_epoch = ceil(n / batch_size)
-    expected_rounds = num_rounds * fraction_train     # client sampling
-    total_steps     = expected_rounds * local_epochs * steps_per_epoch
+Two things here are easy to get wrong and silent when you do.
 
-We invert the RDP accountant once, before training starts, to find the
-noise multiplier sigma that yields the target epsilon at delta after
-total_steps. Sigma is then held constant for the whole run.
+Do not use PrivacyEngine's running accountant. In simulation each client is
+rebuilt every round, so an engine-internal accountant resets every round and
+reports a per-round epsilon while the real budget compounds across rounds --
+wrong by roughly the round count.
 
-Why precompute instead of using PrivacyEngine's running accountant: in
-simulation each client is reconstructed every round, so an engine-internal
-accountant resets each round and would silently report a per-round epsilon
-while the true budget compounds across rounds -- wrong by roughly a factor
-of the round count. That error is the most common reason these papers are
-rejected.
+Do not claim amplification by subsampling. It needs secure aggregation or a
+shuffler, neither of which we assume, so the reported epsilon is an upper
+bound.
 
-We do NOT claim privacy amplification by client subsampling. Amplification
-requires assumptions we do not make (secure aggregation or a shuffler), so
-the reported epsilon is an upper bound. Say so explicitly in the paper.
-
-FIXED STEP COUNT
-----------------
-Poisson sampling makes the number of steps per epoch a random variable,
-which lets total compute drift between configurations. Because this study
-measures energy, compute must be identical across every epsilon -- otherwise
-the energy axis measures workload size rather than the cost of privacy.
-train_private therefore caps each local epoch at a deterministic
-steps_per_epoch = ceil(n / batch_size), and that same count is what the
-accountant is calibrated against. Report the cap.
-
-Verified empirically by verify_dp.py check 0.2:
-Opacus' DPDataLoader already yields exactly ceil(n / batch_size) batches per
-epoch, because it sets sample_rate = 1/len(loader). The cap therefore never
-binds -- it is a guard, not an active constraint -- and the DP branch takes
-exactly the same number of optimiser steps as the non-private branch, for
-every epsilon. What Poisson sampling still randomises is the SIZE of each
-batch (Binomial(n, q)), so the examples processed per round vary by roughly
-+/-2% around n while the step count does not. That residual is unbiased with
-respect to epsilon and averages out over rounds and seeds.
-
-Consequently, per-round step counts differing between two epsilon conditions
-can only come from the two rounds having sampled different clients, never
-from epsilon itself. server_app records sampled_partitions and steps_sum so
-this can be checked rather than assumed.
-
-Clipping norm C is FIXED across all epsilon values. Tuning C per epsilon
-would confound the privacy-utility comparison.
+Clipping norm C is fixed across all epsilon; tuning it per budget would
+confound the privacy-utility comparison.
 """
 
 import json
@@ -76,6 +42,10 @@ CLIPPING_NORM = 1.0
 TARGET_DELTA = 1e-5
 ACCOUNTANT = "rdp"
 
+# Sigmas derived ahead of the sweep by prewarm_sigma.py, read-only here.
+SIGMA_CACHE_PATH = Path(os.environ.get("FL_SIGMA_CACHE", ".sigma_cache.json"))
+_disk_cache: Optional[dict] = None
+
 
 def is_private(epsilon) -> bool:
     """'inf' (or None) selects the non-private baseline."""
@@ -90,48 +60,33 @@ def steps_per_epoch(n_examples: int, batch_size: int) -> int:
     return max(1, math.ceil(n_examples / batch_size))
 
 
-def total_local_steps(
-    n_examples: int,
-    batch_size: int,
-    num_rounds: int,
-    fraction_train: float,
-    local_epochs: int,
-) -> int:
+def total_local_steps(n_examples, batch_size, num_rounds, fraction_train,
+                      local_epochs) -> int:
     """Expected number of local SGD steps over the whole federated run."""
     expected_rounds = max(1.0, num_rounds * fraction_train)
-    spe = steps_per_epoch(n_examples, batch_size)
-    return max(1, int(round(expected_rounds * local_epochs * spe)))
+    return max(1, int(round(
+        expected_rounds * local_epochs * steps_per_epoch(n_examples, batch_size)
+    )))
 
 
-# Disk cache of derived sigmas, written by prewarm_sigma.py before a sweep
-# and only read here. Populating it outside the run keeps the accountant's
-# binary search out of the energy-measurement window entirely -- see the
-# docstring below for why that matters. Read-only at run time, so concurrent
-# Ray actors cannot race on it.
-SIGMA_CACHE_PATH = Path(os.environ.get("FL_SIGMA_CACHE", ".sigma_cache.json"))
-_disk_cache: Optional[dict] = None
+def sigma_cache_key(epsilon, n_examples, batch_size, num_rounds,
+                    fraction_train, local_epochs, delta) -> str:
+    """Stable key. Must match between prewarm and run, exactly."""
+    return "|".join(str(x) for x in (
+        float(epsilon), int(n_examples), int(batch_size), int(num_rounds),
+        float(fraction_train), int(local_epochs), float(delta),
+    ))
 
 
-def sigma_cache_key(
-    epsilon, n_examples, batch_size, num_rounds, fraction_train, local_epochs, delta
-) -> str:
-    """Stable string key. Must match between prewarm and run, exactly."""
-    return "|".join(
-        str(x) for x in (
-            float(epsilon), int(n_examples), int(batch_size), int(num_rounds),
-            float(fraction_train), int(local_epochs), float(delta),
-        )
-    )
-
-
-def _load_disk_cache() -> dict:
+def _disk_cached(key: str) -> Optional[float]:
     global _disk_cache
     if _disk_cache is None:
         try:
             _disk_cache = json.loads(SIGMA_CACHE_PATH.read_text())
         except (OSError, ValueError):
             _disk_cache = {}
-    return _disk_cache
+    hit = _disk_cache.get(key)
+    return None if hit is None else float(hit)
 
 
 @lru_cache(maxsize=4096)
@@ -146,65 +101,43 @@ def noise_multiplier_for(
 ) -> float:
     """Invert the RDP accountant: target epsilon -> sigma.
 
-    Because Dirichlet partitions differ in size, sigma differs per client --
-    correct (each client has its own budget over its own data), but the range
-    must be reported.
+    Partitions differ in size, so sigma differs per client. That is correct --
+    each client budgets over its own data -- but the range has to be reported.
 
-    CACHED, and the cache is load-bearing for the energy measurement, not a
-    micro-optimisation. get_noise_multiplier binary-searches the accountant,
-    and the search costs far more for a loose budget than a tight one:
-    measured 0.086 s at epsilon=0.5 against 0.693 s at epsilon=8, an 8x
-    spread. In simulation each client is reconstructed every round, so an
-    uncached call ran this search once per client per round inside the
-    energy-measurement window, adding roughly 30 x 0.69 s at epsilon=8 versus
-    30 x 0.086 s at epsilon=0.5. That alone reproduced the entire observed
-    wall-clock trend across epsilon (predicted +18.2 s at epsilon=8 relative
-    to epsilon=0.5, observed +19.7 s) while step counts stayed flat -- an
-    accountant artefact masquerading as a cost of privacy.
-
-    sigma is a pure function of these arguments, so memoising is exact.
-
-    In-process memoisation alone is not enough. A client derives sigma on its
-    FIRST participation, which is still inside a measured round, and with 10
-    of 20 clients sampled per round roughly 4.8 rounds contain a first-time
-    client. That leaves a residual of about 4.8 x 0.69 s at epsilon=8 against
-    4.8 x 0.086 s at epsilon=0.5 -- predicted +2.9 s, measured +3.0 s. Small,
-    but correlated with epsilon, which is precisely the axis under study.
-
-    Hence the disk cache: prewarm_sigma.py derives every sigma the sweep
-    needs before any measurement starts, so at run time every lookup is a
-    dict hit and the accountant never runs inside the window.
+    The caching is load-bearing for the energy measurement, not a speed-up.
+    get_noise_multiplier binary-searches the accountant, and the search costs
+    far more for a loose budget than a tight one: 0.086 s at epsilon=0.5
+    against 0.693 s at epsilon=8. Called once per client per round inside the
+    measured window, that alone reproduced an entire wall-clock trend across
+    epsilon while step counts stayed flat -- an accountant artefact shaped
+    exactly like a cost of privacy. In-process memoisation is not enough,
+    because a client's first call still lands inside a measured round; hence
+    the disk cache, filled by prewarm_sigma.py before anything is measured.
     """
-    # Opacus does NOT sample at batch_size/n. DPDataLoader.from_data_loader
-    # sets sample_rate = 1/len(loader) = 1/ceil(n/batch_size), so calibrating
-    # against batch_size/n over-states q by 1-3% and yields a sigma that is
-    # accidentally conservative (measured: true epsilon lands 0.8-1.8% under
-    # target). Matching the sampler exactly makes the accounting tight
-    # instead of merely safe.
-    hit = _load_disk_cache().get(
-        sigma_cache_key(epsilon, n_examples, batch_size, num_rounds,
-                        fraction_train, local_epochs, delta)
-    )
+    key = sigma_cache_key(epsilon, n_examples, batch_size, num_rounds,
+                          fraction_train, local_epochs, delta)
+    hit = _disk_cached(key)
     if hit is not None:
-        return float(hit)
+        return hit
 
-    sample_rate = 1.0 / steps_per_epoch(n_examples, batch_size)
-    steps = total_local_steps(
-        n_examples, batch_size, num_rounds, fraction_train, local_epochs
-    )
+    # Opacus does NOT sample at B/n. DPDataLoader sets sample_rate =
+    # 1/len(loader) = 1/ceil(n/B), so calibrating at B/n over-states q by 1-3%
+    # and yields an accidentally conservative sigma. Matching the sampler
+    # exactly makes the accounting tight rather than merely safe.
     return get_noise_multiplier(
         target_epsilon=float(epsilon),
         target_delta=delta,
-        sample_rate=sample_rate,
-        steps=steps,
+        sample_rate=1.0 / steps_per_epoch(n_examples, batch_size),
+        steps=total_local_steps(n_examples, batch_size, num_rounds,
+                                fraction_train, local_epochs),
         accountant=ACCOUNTANT,
     )
 
 
 def validate_model(model: torch.nn.Module) -> torch.nn.Module:
-    """Opacus rejects BatchNorm (it mixes information across samples).
+    """Opacus rejects BatchNorm, which mixes information across samples.
 
-    The CNN in task.py is already compatible; this guards future edits.
+    The models in task.py are already compatible; this guards future edits.
     """
     if ModuleValidator.validate(model, strict=False):
         model = ModuleValidator.fix(model)
@@ -220,15 +153,19 @@ def train_private(
     noise_multiplier: float,
     max_grad_norm: float = CLIPPING_NORM,
 ) -> Tuple[float, dict, int]:
-    """One round of local DP-SGD.
+    """One round of local DP-SGD. Returns (avg_loss, clean_state_dict, steps).
 
-    Returns (avg_loss, clean_state_dict, n_steps).
+    Each epoch is capped at ceil(n/B) steps, the same count the accountant was
+    calibrated against, so compute cannot drift between epsilon conditions --
+    which would make the energy axis measure workload size instead of privacy.
+    In practice the cap never binds: Opacus already yields exactly that many
+    batches (verify_dp.py check 0.2). Poisson sampling randomises batch SIZE,
+    not step count, and that residual is unbiased in epsilon.
 
-    The state_dict must be unwrapped: Opacus wraps the model in a
-    GradSampleModule, which prefixes every key with '_module.'. Returning the
-    wrapped keys to the server silently breaks aggregation -- FedAvg finds no
-    matching keys, the global model never updates, and everything appears to
-    run fine. This is the most common Opacus + Flower integration bug.
+    The returned state_dict must be unwrapped. Opacus wraps the model in a
+    GradSampleModule, which prefixes every key with '_module.'; hand those
+    keys back to the server and FedAvg matches nothing, the global model never
+    updates, and the run still looks completely healthy.
     """
     n_examples = len(trainloader.dataset)
     batch_size = trainloader.batch_size or 32
@@ -239,8 +176,7 @@ def train_private(
     criterion = torch.nn.CrossEntropyLoss().to(device)
     optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
 
-    privacy_engine = PrivacyEngine(accountant=ACCOUNTANT)
-    model, optimizer, dp_loader = privacy_engine.make_private(
+    model, optimizer, dp_loader = PrivacyEngine(accountant=ACCOUNTANT).make_private(
         module=model,
         optimizer=optimizer,
         data_loader=trainloader,
@@ -251,9 +187,8 @@ def train_private(
 
     running, nsteps = 0.0, 0
     for _ in range(epochs):
-        taken = 0
-        for batch in dp_loader:
-            if taken >= cap:  # deterministic compute across all epsilon
+        for taken, batch in enumerate(dp_loader):
+            if taken >= cap:
                 break
             images = batch["img"].to(device, non_blocking=True)
             labels = batch["label"].to(device, non_blocking=True)
@@ -262,7 +197,6 @@ def train_private(
             loss.backward()
             optimizer.step()
             running += loss.item()
-            taken += 1
             nsteps += 1
 
     clean = {k.replace("_module.", ""): v for k, v in model.state_dict().items()}

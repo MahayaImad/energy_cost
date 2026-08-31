@@ -32,55 +32,30 @@ packages = ["energyfl"]
 publisher = "local"
 
 
-#######################################################################
-# CONFIGURATION MIGRATION NOTICE:
-#
-# What was previously called "federation config" for SuperLink
-# connections in pyproject.toml has been renamed and moved.
-#
-# These settings are now **SuperLink connection configuration**
-# and are defined in the Flower configuration file.
-#
-# The entries below are commented out intentionally and are kept
-# only as a migration reference.
-#
-# Docs: https://flower.ai/docs/framework/ref-flower-configuration.html
-#######################################################################
-
-# [tool.flwr.federations]
-# default = "local-sim"
-
-# [tool.flwr.federations.local-sim]
-# address = ":local:"
-
 [tool.flwr.app.components]
 serverapp = "energyfl.server_app:app"
 clientapp = "energyfl.client_app:app"
 
 [tool.flwr.app.config]
+# Defaults for a single `flwr run .`. The sweep scripts override most of these
+# per run; anything left here is what an unadorned run uses.
 seed = 0
-# "cifar10" or "har". HAR clients are individual study participants, so
-# num-supernodes must equal the participant count of the chosen split:
-# 21 for "official" (the 9 test participants are held out entirely) or
-# 30 for "all".
+# "cifar10" or "har". On HAR a client is a study participant, so
+# num-supernodes must be 21, the participant count of the published
+# subject-disjoint split.
 dataset = "cifar10"
-har-split = "official"
-epsilon = "inf"
+epsilon = "inf"                  # "inf" selects the non-private baseline
 run-id = ""
 num-server-rounds = 30
 num-supernodes = 20
 fraction-train = 0.5
 fraction-evaluate = 0.5
-dirichlet-alpha = 0.5
+dirichlet-alpha = 0.5            # CIFAR-10 only; HAR partitions by subject
 batch-size = 32
 local-epochs = 1
 learning-rate = 0.01
-save-model = false
 # Clipping norm C. FIXED at 1.0 for the main sweep; the ablation overrides it.
 clipping-norm = 1.0
-# Where run_*.json is written. Overridden by the ablation script so those
-# runs never mix into the main sweep's statistics.
+# Where run_*.json is written. The ablation script overrides it so those runs
+# never mix into the main sweep's statistics.
 results-dir = ""
-# Seconds of quiet-GPU sampling used to establish the idle baseline that
-# net-of-idle energy subtracts. 0 falls back to a single instantaneous read.
-idle-probe-s = 5.0
