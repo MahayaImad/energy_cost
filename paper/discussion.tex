@@ -11,10 +11,10 @@
 
 The two costs admit different remedies --- the per-round overhead is an
 implementation problem, the convergence penalty a scheduling one --- and
-per-round energy sees only the first. For a designer the consequence is that
-privacy has no single energy multiplier: it is nearly free at a low accuracy
-target and unreachable at a high one, so the budget and the target have to be
-chosen together rather than in sequence. The reason is that the round budget
+per-round energy sees only the first. The consequence is that privacy has no
+single energy multiplier --- nearly free at a low accuracy target, unreachable
+at a high one --- so budget and target have to be chosen together, not in
+sequence. The reason is that the round budget
 is itself spent out of the privacy budget: more participation requires more
 noise for the same $\varepsilon$, so training longer can stop helping, and a
 stopping rule is needed even though where it falls depends on the dataset and
@@ -33,7 +33,11 @@ larger $\sigma$.
 
 \subsection{Where the Computation Runs}
 
-The geographic point is sharper for federated learning than for centralized training. The computation sits on whatever grids the participating devices do, and no operator chooses them. A deployment cannot relocate the way a data center can; what it can adjust is how much computation the privacy requirement demands.
+The geographic point is sharper for federated learning than for centralized
+training: the computation sits on whatever grids the participating devices do,
+no operator chooses them, and a deployment cannot relocate the way a data
+center can. What it can adjust is how much computation the privacy requirement
+demands.
 
 \subsection{Measuring Energy Around a Privacy Accountant}
 
@@ -43,13 +47,15 @@ noise-calibration search is the case we hit: running inside the federated loop, 
 reproduced our entire observed $\varepsilon$ trend, while executed step counts
 stayed flat, and nothing in the resulting numbers announces this. The three controls of
 Section~\ref{sec:controls} remove it, and we would apply them to any energy
-study of a privacy mechanism.
+study of a privacy mechanism. The same silence afflicts the
+accounting: calibrating $\sigma$ on expected participation leaves the realised
+guarantee unbounded (Section~\ref{sec:accounting}), and only a replay of the
+participation log shows the overspend.
 
 \subsection{Threats to Validity}
 
 Clients are virtual and share one GPU, so the ratios transfer to real devices,
-but the absolute joules do not; confirming them on physical hardware is the
-immediate next step. Measurement is GPU-only and communication energy is
+but the absolute joules do not; confirming them on hardware is the next step. Measurement is GPU-only and communication energy is
 modelled --- for a $0.15$--$0.24$~MB model over tens of rounds we expect it
 small, but have not shown it. Two datasets bound the effects rather than
 establishing them. Our guarantee is example-level and local: a client-level mechanism would noise

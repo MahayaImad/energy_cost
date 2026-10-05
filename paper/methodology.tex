@@ -30,6 +30,7 @@ from convenience. Under whole-run accounting the number of rounds enters the
 privacy calculation directly, so it is not a free parameter.
 
 \subsection{Privacy Accounting}
+\label{sec:accounting}
 
 We enforce \emph{example-level} differential privacy, applied locally:
 Opacus~\cite{yousefpour2021opacus} clips and noises per-sample gradients
@@ -65,9 +66,8 @@ client's spent $\varepsilon$ from the participation log, the worst client
 overspends in every private run we measured, by $4$--$22\%$
 (Table~\ref{tab:perround}, last column). A guarantee that must hold
 unconditionally has to drop $q_c$ and calibrate against $R \, E \, \lceil n/B
-\rceil$, or cap participation per client; we report the target
-$\varepsilon$ as the design parameter it is, with the realised worst case
-beside it.
+\rceil$, or cap participation per client; we sweep the nominal
+$\varepsilon$ and report the worst realised one beside it.
 
 Because per-client dataset sizes differ, $\sigma$ differs per client, and the
 two datasets sit in different regimes: a HAR client holds far fewer examples,

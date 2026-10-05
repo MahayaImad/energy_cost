@@ -6,4 +6,4 @@
 
  Three practical implications follow. First, set the round budget from the privacy budget rather than the task, since additional rounds consume privacy budget and can become counterproductive. At $\varepsilon=0.5$ on CIFAR-10 the peak falls at round 8 of 30, and the rounds after it carry two thirds of the run's energy. Second, choose the privacy budget and target accuracy jointly because privacy can impose an accuracy ceiling. Third, when the model is noise-limited, hyperparameter tuning provides little benefit.
 
- Finally, energy measurements can be biased by privacy-accounting overhead. We therefore recommend precomputing noise multipliers, verifying step counts, and randomizing run order. Future work should identify when the system shifts from implementation-limited to noise-limited behavior.
+ Finally, energy measurements can be biased by the privacy accounting itself, in its timing and in its calibration, and both are silent; the controls of Section~\ref{sec:controls} remove them. Future work should identify when the system shifts from implementation-limited to noise-limited behavior.

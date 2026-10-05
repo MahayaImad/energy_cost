@@ -17,9 +17,9 @@ gives $+34\%$.
 Whether that overhead depends on $\varepsilon$ is a question about five
 condition means, not one difference, so a noise floor is the wrong instrument.
 The per-condition overheads run from $+43.4\%$ to $+62.2\%$, a spread of
-$12.5\%$ of their mean, and the across-seed spread \emph{within} one budget
-is the same size, $\pm 2.58$~J/round or $12.0\%$: at $\varepsilon = 4$, the
-largest overhead, the three seeds span $20.9$--$24.1$~J. A permutation test on
+$12.5\%$ of their mean --- the size of the across-seed spread within one
+budget: at $\varepsilon = 4$, the largest overhead, the three seeds span
+$20.9$--$24.1$~J. A permutation test on
 the fifteen per-seed values gives $F = 1.46$, $p = 0.27$; on CIFAR-10,
 $F = 0.46$, $p = 0.79$. We report no resolvable dependence on $\varepsilon$
 and claim no equality: three seeds bound any budget effect at about the size
@@ -56,7 +56,7 @@ $\infty$ & 54.47 & 36.75 & 14.0 & ---       & ---   & --- \\
 
 \subsection{The Cost Grows with the Target}
 
-Energy per round suggests that privacy adds a fixed cost, but the total cost rises sharply with the target accuracy (Table~\ref{tab:target}). Every entry in Table~\ref{tab:target} is a mean over all three seeds except the one marked $\ddagger$, which two of three reached. At $0.40$ accuracy, privacy adds no measurable cost for $\varepsilon \geq 1$ ($187$--$210$ J against $185$ J without it). The private runs reach this first target in fewer rounds than the non-private one, which we attribute to noise acting as regularization early in training; the effect reverses at every higher target.
+The total cost rises sharply with the target accuracy (Table~\ref{tab:target}). Every entry in Table~\ref{tab:target} is a mean over all three seeds except the one marked $\ddagger$, which two of three reached. At $0.40$ accuracy, privacy adds no measurable cost for $\varepsilon \geq 1$ ($187$--$210$ J against $185$ J without it). The private runs reach this first target in fewer rounds than the non-private one, which we attribute to noise acting as regularization early in training; the effect reverses at every higher target.
 
 At $0.50$, private training requires $1.28$--$1.79\times$ the non-private energy, rising to $5.7\times$ at $0.70$; $\varepsilon \le 2$ does not reach this target. At $0.85$, the non-private model reaches the target in $57.0$ rounds and $839$~J, while no tested private budget reaches it.
 
@@ -130,7 +130,7 @@ headline claims.
 
 \subsection{Ablations}
 
-We vary one factor at a time at $\varepsilon \in \{1,\infty\}$ with three seeds per cell. On HAR only local epochs and the clipping norm vary: the federation size is fixed by the data split and there is no Dirichlet parameter. The ablation sweep ran in its own session, whose baseline sits about $2$~J/round above Table~\ref{tab:perround}'s, so energies here are compared within this sweep only.
+We vary one factor at a time at $\varepsilon \in \{1,\infty\}$ with three seeds per cell. On HAR only local epochs and the clipping norm vary: the federation size is fixed by the data split and there is no Dirichlet parameter. The ablation sweep ran in its own session, about $2$~J/round above Table~\ref{tab:perround}'s baseline, so energies here are compared within it only.
 
 \textbf{Under a tight budget, the model becomes noise-limited.} At $\varepsilon=1$ on HAR, neither local epochs nor clipping norm moves final accuracy outside the $\pm 0.041$ across-seed floor of these cells. With $\sigma\approx10$, injected noise dominating these settings, tuning them does not improve the private model.
 
@@ -142,11 +142,10 @@ We vary one factor at a time at $\varepsilon \in \{1,\infty\}$ with three seeds 
 
 \subsection{Carbon Cost by Grid}
 
-Table~\ref{tab:carbon} scales the measured HAR
-energy to 1000 runs and apply published grid carbon
-intensities~\cite{energy2024yearly}; the scaling repeats the measured
-workload rather than extrapolating to other hardware. The cost attributable to privacy
-ranges from $106$--$148$~gCO$_2$eq on Algeria's gas-dominated grid to
+Table~\ref{tab:carbon} scales the measured HAR energy to 1000 runs at
+published grid carbon intensities~\cite{energy2024yearly}, repeating the
+measured workload rather than extrapolating to other hardware. The cost
+attributable to privacy ranges from $106$--$148$~gCO$_2$eq on Algeria's gas-dominated grid to
 $5.7$--$7.9$~g in Norway. The factor of $18.8$ between them is the ratio of
 the two grid intensities and would be identical for non-private training; what
 privacy contributes is the premium itself, which is a quantity in grams and
