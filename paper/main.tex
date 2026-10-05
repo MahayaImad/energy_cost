@@ -1,13 +1,3 @@
-% The Energy Cost of Privacy in Federated Learning -- cSIS 2026, Track 1.
-%
-% Build:  pdflatex main && bibtex main && pdflatex main && pdflatex main
-%
-% BEFORE SUBMISSION
-%   - fill in the author block below (affiliation is a placeholder)
-%   - copy the three PNGs written by `python analyze.py results_har/` into
-%     this directory (fig1_convergence, fig3_energy_per_round, fig4_carbon)
-%   - check IEEEtran.cls and IEEEtran.bst are on the path (texlive-publishers)
-
 \documentclass[conference]{IEEEtran}
 \IEEEoverridecommandlockouts
 
@@ -16,22 +6,31 @@
 \usepackage{amssymb}
 \usepackage{graphicx}
 \usepackage{url}
-
-% Deliberately only the local directory. analyze.py writes identically named
-% PNGs into results_har/ and results/, so listing both here would silently
-% pick one set. Copy the set you mean beside main.tex.
+\renewcommand{\IEEEkeywordsname}{Keywords}
 \graphicspath{{./}}
 
 \begin{document}
 
-\title{The Energy Cost of Privacy in Federated Learning}
+\title{\textbf{The Energy Cost of Privacy in Federated Learning}}
 
-% TODO: affiliation and department are placeholders.
-\author{\IEEEauthorblockN{Imad Mahaya}
-\IEEEauthorblockA{\textit{Department} \\
-\textit{University} \\
-Algeria \\
-mahaya.imad@gmail.com}
+\author{%
+\IEEEauthorblockN{Imad Mahaya}
+\IEEEauthorblockA{\textit{LaSTIC Laboratory} \\
+\textit{University of Batna 2} \\
+Batna, Algeria \\
+imad.mahaya@univ-batna2.dz}
+\and
+\IEEEauthorblockN{Ali Behloul}
+\IEEEauthorblockA{\textit{LaSTIC Laboratory} \\
+\textit{University of Batna 2} \\
+Batna, Algeria \\
+a.behloul@univ-batna2.dz}
+\and
+\IEEEauthorblockN{Khaled Hamouid}
+\IEEEauthorblockA{\textit{LaSTIC Laboratory} \\
+\textit{University of Batna 2} \\
+Batna, Algeria \\
+k.hamouid@univ-batna2.dz}
 }
 
 \maketitle
@@ -43,20 +42,16 @@ configuration is deployable at all, and it is not reported. We measure the
 energy cost of client-level differential privacy with NVML hardware counters
 differenced around each federated round, sweeping the privacy budget on
 UCI-HAR, whose clients are the individual study participants, and on CIFAR-10.
-The cost separates in two. A per-round overhead from per-sample gradients and
-clipping costs $+51\%$ on HAR and $+34\%$ on CIFAR-10, carrying no systematic
-dependence on $\varepsilon$; it decomposes into a power factor of $1.19\times$
-that is the same on both datasets to within $0.5\%$ and a duration factor that
-is not. Everything budget-dependent acts through the number of rounds
-required, and is the larger term. Measured as energy-to-target-accuracy,
-privacy is free at $0.40$ accuracy on HAR, costs $5.7\times$ at $0.70$, and
-cannot buy $0.85$ at any expenditure. Because the cost is paid in joules it
-inherits the local carbon intensity, an $18.8\times$ range between Algeria's
-grid and Norway's for an identical guarantee. We also report two measurement
-hazards: running the privacy accountant inside the timed loop reproduces an
-entire apparent $\varepsilon$ trend, and calibrating the noise against
-expected client participation leaves all 29 of our private runs spending more
-than their stated budget, by up to $22\%$.
+The cost separates in two. A fixed per-round overhead from per-sample
+gradients and clipping costs $+51\%$ on HAR and $+60\%$ on CIFAR-10 with no systematic dependence on $\varepsilon$; everything budget-dependent acts through the
+number of rounds required, and is the larger term. Measured as
+energy-to-target-accuracy, privacy is free at $0.40$ accuracy on HAR for $\varepsilon \geq 1$,
+$5.7\times$ at $0.70$, and unbounded at $0.85$, which no budget we tested
+reaches at any expenditure. Because the cost is paid in joules it inherits the
+local carbon intensity, a $21.4\times$ range between Algeria's grid and
+Norway's for an identical guarantee. We also report a measurement hazard:
+running the privacy accountant's noise calibration inside the timed loop
+reproduced an entire apparent $\varepsilon$ trend.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -68,12 +63,6 @@ footprint, edge computing, human activity recognition
 \input{related-work}
 \input{methodology}
 
-% Table I spans both columns: seven columns do not fit one.
-\input{tables}
-
-% Figures live in their own file but must be declared BEFORE the text that
-% references them: LaTeX floats forward only, so inputting them after
-% Section IV would push all three to the end of the paper.
 \input{figures}
 
 \input{results}
