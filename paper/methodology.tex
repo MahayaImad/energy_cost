@@ -51,7 +51,16 @@ accountant resets each round and reports a per-round $\varepsilon$ while the
 true budget compounds. Opacus samples at a rate $1/\lceil n/B \rceil$ rather
 than $B/n$, and we calibrate at the rate the sampler uses. We claim no
 amplification by client subsampling, which would require secure aggregation or
-a shuffler, so the reported $\varepsilon$ is an upper bound.
+a shuffler.
+
+One consequence of precomputing is that $\sigma$ is calibrated on the
+\emph{expected} number of participations, $R \, q_c$, while the realised count
+is binomial, so a client sampled more often than expected spends more than the
+nominal budget. Recomputing each client's spent $\varepsilon$ from the
+participation log, the worst client overspends in every private run we
+measured, by $4$--$22\%$ (Table~\ref{tab:perround}). The target
+$\varepsilon$ is therefore a design parameter rather than a certified bound;
+certifying one requires capping participation per client.
 
 Because per-client dataset sizes differ, $\sigma$ differs per client, and the
 two datasets sit in different regimes: a HAR client holds far fewer examples,
@@ -64,8 +73,8 @@ every round.
 
 Energy comes from the NVML counter, which accumulates
 millijoules on the device. Differencing it around each round requires no power
-sampling and no integration and cannot miss a transient. This is measured,
-not estimated from a TDP model. Measurement is server-side; all clients
+sampling and no integration and cannot miss a transient. Measurement is
+server-side; all clients
 share one GPU in simulation, so a round-level window captures the full cost
 regardless of actor scheduling, whereas measuring inside each client would
 double-count concurrent work.
@@ -75,9 +84,10 @@ board power settles, since a card does not reach its floor the moment a run
 ends and probing during that tail reads a busy baseline. Baselines are checked
 against the sweep median, and outliers are discarded. Net energy subtracts the
 baseline over the wall clock the counter covers, excluding start-up, central
-evaluation and teardown. The three seeds also give a measurement noise floor,
-taken as the worst within-condition spread across seeds and reported in
-Section~\ref{sec:Results}; no smaller difference is treated as an effect.
+evaluation and teardown. The three seeds also give measurement noise floors,
+taken as the worst within-condition spread across seeds --- one for power and
+one for final accuracy --- and reported in Section~\ref{sec:Results}; no
+smaller difference is treated as an effect.
 
 \subsection{Experimental Controls}
 

@@ -43,12 +43,13 @@ energy cost of client-level differential privacy with NVML hardware counters
 differenced around each federated round, sweeping the privacy budget on
 UCI-HAR, whose clients are the individual study participants, and on CIFAR-10.
 The cost separates in two. A fixed per-round overhead from per-sample
-gradients and clipping costs $+51\%$ on HAR and $+60\%$ on CIFAR-10 with no systematic dependence on $\varepsilon$; everything budget-dependent acts through the
+gradients and clipping costs $+51\%$ on HAR and $+34\%$ on CIFAR-10, in
+neither case ordered in $\varepsilon$; everything budget-dependent acts through the
 number of rounds required, and is the larger term. Measured as
 energy-to-target-accuracy, privacy is free at $0.40$ accuracy on HAR for $\varepsilon \geq 1$,
 $5.7\times$ at $0.70$, and unbounded at $0.85$, which no budget we tested
 reaches at any expenditure. Because the cost is paid in joules it inherits the
-local carbon intensity, a $21.4\times$ range between Algeria's grid and
+local carbon intensity, an $18.8\times$ range between Algeria's grid and
 Norway's for an identical guarantee. We also report a measurement hazard:
 running the privacy accountant's noise calibration inside the timed loop
 reproduced an entire apparent $\varepsilon$ trend.

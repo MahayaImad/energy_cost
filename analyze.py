@@ -48,8 +48,9 @@ TARGET_ACCS_BY_DATASET = {
     "har": (0.50, 0.70, 0.85),
 }
 
-# The grids Table III tabulates, in the paper's order. The figure plots all six.
-PAPER_GRIDS = ("Norway", "France", "Algeria", "India")
+# The grids the carbon table tabulates, in the paper's order -- all six, so
+# the table in the paper is this script's output and nothing is typed by hand.
+PAPER_GRIDS = ("Norway", "France", "Germany", "USA (avg)", "Algeria", "India")
 
 ABLATION_FACTORS = {
     "dirichlet_alpha": "alpha",
@@ -933,7 +934,7 @@ def latex_tables(by_eps, targets, sigma_from=None, realised_eps=None):
     print("\\hline")
     print("\\end{tabular}")
 
-    worst, best = PAPER_GRIDS[2], PAPER_GRIDS[0]   # Algeria against Norway
+    worst, best = "Algeria", "Norway"   # the paper's regional contrast
     ratio = GRID_GCO2_PER_KWH[worst] / GRID_GCO2_PER_KWH[best]
     pw = sorted((k - base_kwh) * GRID_GCO2_PER_KWH[worst] for k in dp_kwh)
     pb = sorted((k - base_kwh) * GRID_GCO2_PER_KWH[best] for k in dp_kwh)

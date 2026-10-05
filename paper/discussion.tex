@@ -11,15 +11,15 @@
 
 Separating the two costs matters because they admit different remedies: the fixed overhead is an implementation problem, the convergence penalty a scheduling one, and per-round energy sees only the first.
 
-Privacy does not impose a constant energy overhead: on HAR, it is negligible at $0.40$ accuracy, rises to $5.7\times$ at $0.70$, and becomes unbounded at $0.85$. Beyond this point, additional computation does not improve accuracy. Privacy and target utility should therefore be chosen jointly rather than sequentially.
+Privacy does not impose a constant energy overhead: on HAR it is negligible at $0.40$ accuracy and unbounded at $0.85$, beyond which no expenditure buys the target. Privacy and target utility should therefore be chosen jointly rather than sequentially.
 
-The reason is that the round budget affects the privacy budget. More client participation requires more noise to maintain the same $\varepsilon$; on HAR, increasing rounds raises $\sigma$ and training longer can become counterproductive. A stopping rule is therefore needed, although its exact threshold depends on the dataset and privacy budget.
+The reason is that the round budget is itself spent out of the privacy budget: more participation requires more noise for the same $\varepsilon$, so training longer can become counterproductive. A stopping rule is needed, although where it falls depends on the dataset and the budget.
 
 \subsection{When the Model Is Noise-Limited, Tuning Is Not the Lever}
 
 Our HAR ablations are negative and useful. At $\varepsilon = 1$ neither local
-epochs nor the clipping norm moves accuracy by more than $3\%$ against a
-$7.8\%$ floor, so a practitioner responding to a disappointing private model
+epochs nor the clipping norm moves accuracy outside the $\pm 0.041$
+across-seed floor of the ablation cells, so a practitioner responding to a disappointing private model
 by sweeping hyperparameters will spend considerable energy to land where they
 started. This does not hold in every regime, and CIFAR-10 shows why: there the
 private model retains more signal, and the same settings can be got badly
@@ -30,13 +30,6 @@ larger $\sigma$.
 
 \subsection{Where the Computation Runs}
 
-% Measured in joules, the cost inherits the carbon intensity of wherever they
-% are drawn: a $21.4\times$ range between Algeria's grid and Norway's for
-% identical computation and an identical guarantee. The point is sharper for
-% federated learning than for centralized training, because the computation
-% sits on whatever grids the participating devices do, and no operator chooses
-% them. A deployment cannot relocate the way a data center can; what it can
-% adjust is how much computation the privacy requirement demands.
 The geographic point is sharper for federated learning than for centralized training. The computation sits on whatever grids the participating devices do, and no operator chooses them. A deployment cannot relocate the way a data center can; what it can adjust is how much computation the privacy requirement demands.
 
 \subsection{Measuring Energy Around a Privacy Accountant}
@@ -58,5 +51,7 @@ immediate next step. Measurement is GPU-only and communication energy is
 modelled --- for a $0.15$--$0.24$~MB model over tens of rounds we expect it
 small, but have not shown it. Two datasets bound the effects rather than
 establishing them. And our accounting claims no amplification by subsampling,
-so the reported $\varepsilon$ is an upper bound: these are the costs under the
-weakest trust assumptions, not the best achievable.
+so these are the costs under the weakest trust assumptions, not the best
+achievable --- while in the other direction the realised participation count
+puts the worst client above its nominal budget in every private run, which a
+deployment would have to cap.
