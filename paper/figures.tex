@@ -8,8 +8,8 @@
 \centering
 \includegraphics[width=\columnwidth]{fig1_convergence.png}
 \caption{Central test accuracy per round on UCI-HAR, mean $\pm 1$ SD over
-three seeds. No stopping round is marked: on HAR the drop from peak to round
-100 stays inside the across-seed spread at every budget (Section~\ref{sec:Results}).}
+three seeds. No stopping round is marked: on HAR no peak-to-final drop clears
+the across-seed spread.}
 \label{fig:convergence}
 \end{figure}
 
@@ -30,17 +30,11 @@ three seeds. No stopping round is marked: on HAR the drop from peak to round
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{fig3_energy_per_round.png}
-\caption{Net energy per round on UCI-HAR by privacy budget, mean $\pm 1$ SD
-over three seeds; the non-private baseline is in grey.}
+\caption{Net energy per round on UCI-HAR, mean $\pm 1$ SD over three seeds;
+non-private baseline in grey.}
 \label{fig:perround}
 \end{figure}
 
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{fig4_carbon.png}
-\caption{Emissions of 1000 UCI-HAR runs across six grid carbon intensities.
-The gap between private and non-private curves is the carbon attributable
-to privacy.}
-\label{fig:carbon}
-\end{figure}
+% fig4 (carbon by grid) dropped: Table~\ref{tab:carbon} is the same six
+% numbers, and the reviewers asked for the redundancy to go first.

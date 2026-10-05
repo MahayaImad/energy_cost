@@ -1,8 +1,19 @@
 % Bibliography for "The Energy Cost of Privacy in Federated Learning".
 %
-% BEFORE SUBMISSION: entries marked "and others" carry only the first author
-% because the co-author list was not verified here -- expand them from the
-% publisher record, and fill in the missing volume, page and DOI fields.
+% IEEEtran shows one author plus "et al." past its default name limit, which
+% a reviewer flagged: six are permitted. The control entry below raises the
+% limit to six and main.tex cites it with \bstctlcite before the first
+% citation. Preprints are misc entries carrying the arXiv id in howpublished,
+% which IEEEtran prints, rather than journal entries with no volume.
+%
+% STILL OPEN, from the publisher record: page numbers for anguita2013public
+% (ESANN 2013, paper es2013-84) and a DOI for aroussi2026adaptive.
+
+@IEEEtranBSTCTL{BSTcontrol,
+  CTLuse_forced_etal       = "yes",
+  CTLmax_names_forced_etal = "6",
+  CTLnames_show_etal       = "6"
+}
 
 @inproceedings{abadi2016deep,
   title={Deep learning with differential privacy},
@@ -21,47 +32,47 @@
   organization={IEEE}
 }
 
-@article{geyer2017differentially,
+@misc{geyer2017differentially,
   title={Differentially private federated learning: A client level perspective},
   author={Geyer, Robin C and Klein, Tassilo and Nabi, Moin},
-  journal={arXiv preprint arXiv:1712.07557},
-  year={2017}
+  year={2017},
+  howpublished={arXiv:1712.07557}
 }
 
-@article{yousefpour2021opacus,
+@misc{yousefpour2021opacus,
   title={Opacus: User-friendly differential privacy library in PyTorch},
   author={Yousefpour, Ashkan and Shilov, Igor and Sablayrolles, Alexandre and Testuggine, Davide and Prasad, Karthik and Malek, Mani and Nguyen, John and Ghosh, Sayan and Bharadwaj, Akash and Zhao, Jessica and others},
-  journal={arXiv preprint arXiv:2109.12298},
-  year={2021}
+  year={2021},
+  howpublished={arXiv:2109.12298}
 }
 
-@article{beutel2020flower,
+@misc{beutel2020flower,
   title={Flower: A friendly federated learning research framework},
-  author={Beutel, Daniel J and Topal, Taner and Mathur, Akhil and Qiu, Xinchi and Fernandez-Marques, Javier and Gao, Yan and Sani, Lorenzo and Li, Kwing Hei and Parcollet, Titouan and de Gusm{\~A}{\c{G}}o, Pedro Porto Buarque and others},
-  journal={arXiv preprint arXiv:2007.14390},
-  year={2020}
+  author={Beutel, Daniel J and Topal, Taner and Mathur, Akhil and Qiu, Xinchi and Fernandez-Marques, Javier and Gao, Yan and Sani, Lorenzo and Li, Kwing Hei and Parcollet, Titouan and de Gusm{\~a}o, Pedro Porto Buarque and others},
+  year={2020},
+  howpublished={arXiv:2007.14390}
 }
 
 @inproceedings{anguita2013public,
-  title={A public domain dataset for human activity recognition using smartphones.},
-  author={Anguita, Davide and Ghio, Alessandro and Oneto, Luca and Parra, Xavier and Reyes-Ortiz, Jorge Luis and others},
-  booktitle={Esann},
-  volume={3},
-  number={1},
-  pages={3--4},
-  year={2013}
+  title={A public domain dataset for human activity recognition using smartphones},
+  author={Anguita, Davide and Ghio, Alessandro and Oneto, Luca and Parra, Xavier and Reyes-Ortiz, Jorge Luis},
+  booktitle={Proc. 21st Eur. Symp. Artificial Neural Networks, Computational
+             Intelligence and Machine Learning (ESANN)},
+  address={Bruges, Belgium},
+  year={2013},
+  note={paper es2013-84}
 }
 
-@article{hsu2019measuring,
+@misc{hsu2019measuring,
   title={Measuring the effects of non-identical data distribution for federated visual classification},
   author={Hsu, Tzu-Ming Harry and Qi, Hang and Brown, Matthew},
-  journal={arXiv preprint arXiv:1909.06335},
-  year={2019}
+  year={2019},
+  howpublished={arXiv:1909.06335}
 }
 
 @misc{corporation2024nvidia,
   title={NVIDIA Management Library (NVML)},
-  author={Corporation, NVIDIA},
+  author={{NVIDIA Corporation}},
   howpublished = {\url{https://docs.nvidia.com/deploy/nvml-api/}},
   year={2024}
 }
@@ -97,18 +108,19 @@
   year={2020}
 }
 
-@article{anthony2020carbontracker,
+@misc{anthony2020carbontracker,
   title={Carbontracker: Tracking and predicting the carbon footprint of training deep learning models},
   author={Anthony, Lasse F Wolff and Kanding, Benjamin and Selvan, Raghavendra},
-  journal={arXiv preprint arXiv:2007.03051},
-  year={2020}
+  year={2020},
+  note={ICML Workshop on Challenges in Deploying and Monitoring ML Systems},
+  howpublished={arXiv:2007.03051}
 }
 
-@article{lacoste2019quantifying,
+@misc{lacoste2019quantifying,
   title={Quantifying the carbon emissions of machine learning},
   author={Lacoste, Alexandre and Luccioni, Alexandra and Schmidt, Victor and Dandres, Thomas},
-  journal={arXiv preprint arXiv:1910.09700},
-  year={2019}
+  year={2019},
+  howpublished={arXiv:1910.09700}
 }
 
 @article{bouza2023estimate,
@@ -133,11 +145,11 @@
   publisher={MDPI}
 }
 
-@article{patterson2021carbon,
+@misc{patterson2021carbon,
   title={Carbon emissions and large neural network training},
   author={Patterson, David and Gonzalez, Joseph and Le, Quoc and Liang, Chen and Munguia, Lluis-Miquel and Rothchild, Daniel and So, David and Texier, Maud and Dean, Jeff},
-  journal={arXiv preprint arXiv:2104.10350},
-  year={2021}
+  year={2021},
+  howpublished={arXiv:2104.10350}
 }
 
 @article{savazzi2022energy,
@@ -161,6 +173,9 @@
   year={2023}
 }
 
+% TODO: a reviewer could not confirm this record and asked for its DOI.
+% Confirm it against IEEE Xplore (title, pages, DOI) or drop the citation --
+% it is the closest competing claim in the paper, so it has to be solid.
 @inproceedings{aroussi2026adaptive,
   title={Adaptive Privacy Optimization for Energy-Constrained Tiny Federated Learning Devices},
   author={Aroussi, Said Alami and Silkan, Hassan and El Ouadrhiri, Ahmed and Hadni, Meryeme},
@@ -208,6 +223,7 @@
   author={Mao, Jiayu and Yin, Tongxin and Yener, Aylin and Liu, Mingyan},
   journal={IEEE Open Journal of Vehicular Technology},
   year={2026},
+  note={early access},
   publisher={IEEE}
 }
 
@@ -269,12 +285,13 @@
   author={Yuan, Xin and Savkin, Andrey V and Ni, Wei and Xue, Minhui and Liu, Ren Ping},
   journal={IEEE Transactions on Dependable and Secure Computing},
   year={2025},
+  note={early access},
   publisher={IEEE}
 }
 
 @misc{energy2024yearly,
   title={Yearly electricity data},
-  author={Energy, Ember},
+  author={{Ember}},
   year={2024},
   publisher={Ember},
   howpublished = {\url{https://ember-energy.org/data/yearly-electricity-data/}}

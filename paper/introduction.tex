@@ -20,13 +20,6 @@ measuring~\cite{schwartz2020green, strubell2019energy}, but attention has gone t
 centralized training, where one operator owns the hardware and can move the
 job to a cleaner grid. Federated learning inverts both conditions.
 
-There is a second reason to look at energy. Differential privacy slows
-convergence, so a model under a tight budget needs more rounds to reach a
-given accuracy, and every round costs energy on every participating device.
-The accuracy penalty and the energy penalty are, therefore, not independent.
-Reporting only the first one understates the total cost of the method and hides
-the fact that they are produced by different mechanisms.
- 
 Previous work approaches this and stops short. Wireless resource-allocation
 studies minimize device energy under a privacy constraint~\cite{liu2020privacy, zhang2023communication,
 mao2026providing, chen2023energy, ding2026energy}, but the energy there is an objective inside a convergence limit
@@ -46,10 +39,12 @@ different decisions.
  
 We measure that shape. Energy comes from NVML~\cite{corporation2024nvidia} (NVIDIA Management Library) 
 hardware counters for each federated round, not from device power ratings, and the privacy
-budget is accounted over the whole run rather than per round. Our primary
-dataset is UCI-HAR~\cite{anguita2013public}, where the federation's clients are the
-individual volunteers who contributed the data, so the client boundary is a
-real person rather than a synthetic partition. CIFAR-10 checks the same
+budget is accounted over the whole run rather than per round. The guarantee is
+example-level, applied locally at each client so that it holds against an
+untrusted server, with the budget held per client over the whole run. Our
+primary dataset is UCI-HAR~\cite{anguita2013public}, where the federation's
+clients are the individual volunteers who contributed the data, so the client
+boundary is a real person rather than a synthetic partition. CIFAR-10 checks the same
 effects on a harder benchmark.
 
 The paper makes four claims. The cost of privacy separates into a fixed
@@ -60,7 +55,7 @@ actually needs, the cost is not a multiplier but a ceiling above which no
 expenditure buys the target. Under a tight budget, training past a certain
 round spends energy and loses accuracy at the same time, so the stopping point
 is set by the privacy budget, rather than by the task. Because the cost is
-paid in joules, it inherits the carbon intensity of wherever the devices are,
+paid in joules, the premium attributable to privacy is a geographic quantity,
 which the privacy-utility framing cannot express.
  
 One further result concerns the measurement itself. Deriving the noise

@@ -1,17 +1,29 @@
 \section{Results}
 \label{sec:Results}
 
-All figures are over three seeds, against noise floors taken as the worst
-within-condition across-seed spread: in power, $7.8\%$ on HAR and $8.9\%$ on
-CIFAR-10; in final accuracy, $\pm 0.051$ and $\pm 0.031$. No smaller
+All figures are over three seeds and net of the idle baseline. Noise floors
+are the worst within-condition across-seed spread of the quantity each one
+bounds: energy per round, $12.0\%$ on HAR; board power, $7.8\%$ on HAR and
+$8.9\%$ on CIFAR-10; final accuracy, $\pm 0.051$ and $\pm 0.031$. No smaller
 difference is resolvable.
 
-\subsection{The Per-Round Cost Is Fixed}
+\subsection{The Per-Round Cost Does Not Track the Budget}
 
 On HAR, private training consumes $21.1$~J per round against $14.0$~J without privacy, an overhead of $+51\%$ 
 (Table~\ref{tab:perround}, Fig.~\ref{fig:perround}). The overhead combines $+26.7\%$ wall-clock and
-$+19.0\%$ mean power, so a power ratio alone would report $19\%$. Across the five private budgets the spread is $12.5\%$ of the mean against a $7.8\%$ noise floor, and it does not order with $\varepsilon$: we claim no
-systematic dependence rather than equality. CIFAR-10 shows the same pattern ($+34\%$, spread $6.0\%$, inside its $8.9\%$ floor).
+$+19.0\%$ mean power, so a power ratio alone would report $19\%$. CIFAR-10
+gives $+34\%$.
+
+Whether that overhead depends on $\varepsilon$ is a question about five
+condition means, not one difference, so a noise floor is the wrong instrument.
+The per-condition overheads run from $+43.4\%$ to $+62.2\%$, a spread of
+$12.5\%$ of their mean, and the across-seed spread \emph{within} one budget
+is the same size, $\pm 2.58$~J/round or $12.0\%$: at $\varepsilon = 4$, the
+largest overhead, the three seeds span $20.9$--$24.1$~J. A permutation test on
+the fifteen per-seed values gives $F = 1.46$, $p = 0.27$; on CIFAR-10,
+$F = 0.46$, $p = 0.79$. We report no resolvable dependence on $\varepsilon$
+and claim no equality: three seeds bound any budget effect at about the size
+of the overhead's own scatter, not at zero.
 
 These results separate the two sources of energy cost: the per-round overhead comes from the DP operations and does not order with $\varepsilon$, while everything budget-dependent acts through the number of rounds a target accuracy needs, which per-round energy cannot see.
 
@@ -22,10 +34,9 @@ These results separate the two sources of energy cost: the per-round overhead co
 % ---------------------------------------------------------------------
 \begin{table}[t]
 \centering
-\caption{Per-round energy on UCI-HAR (100 rounds, mean of three seeds).
-Overhead is net J/round relative to $\varepsilon=\infty$. ``Worst
-$\varepsilon$'' is the budget actually spent by the most-sampled client,
-recomputed from the participation log.}
+\caption{Per-round energy on UCI-HAR, mean of three seeds. Overhead is net
+J/round against $\varepsilon=\infty$; Worst $\varepsilon$ is what the
+most-sampled client actually spent.}
 \label{tab:perround}
 \footnotesize
 \setlength{\tabcolsep}{4.5pt}
@@ -50,10 +61,9 @@ Energy per round suggests that privacy adds a fixed cost, but the total cost ris
 At $0.50$, private training requires $1.28$--$1.79\times$ the non-private energy, rising to $5.7\times$ at $0.70$; $\varepsilon \le 2$ does not reach this target. At $0.85$, the non-private model reaches the target in $57.0$ rounds and $839$~J, while no tested private budget reaches it.
 
 \begin{table}[t]
-\caption{Net energy (J) to reach a target accuracy on UCI-HAR, mean of
-three seeds; mean rounds in parentheses. ``---'': not reached within
-100 rounds; $\ddagger$: reached by two of three seeds. Totals include a
-$\approx$110\,J first-round warm-up.}
+\caption{Net energy (J) to a target accuracy on UCI-HAR; mean rounds in
+parentheses. ``---'': unreached in 100 rounds. $\ddagger$: two of three
+seeds. Includes a $\approx$110\,J warm-up round.}
 \label{tab:target}
 \centering
 \begin{tabular}{lrrrr}
@@ -85,7 +95,12 @@ against $\pm 0.010$, the seeds peaking at rounds 8, 8 and 9; the rounds after
 the peak account for $60$--$68\%$ of the run's net energy. At $\varepsilon =
 1$ the drop is $0.044$ against $\pm 0.014$, with $42$--$61\%$ of the energy
 spent after a peak the seeds place between rounds 10 and 16. At $\varepsilon
-\ge 2$ the drops fall inside their spreads.
+\ge 2$ the drops fall inside their spreads. Those energy fractions are close
+to the fraction of the schedule that follows the peak, because per-round
+energy is flat; the result is the peak's position and the resolvable decline
+after it, while the joules price the tail of a round budget the designer
+chose. The actionable form is the peak round itself: round 8 of 30 at
+$\varepsilon = 0.5$.
 
 On HAR (Fig.~\ref{fig:convergence}) no budget resolves one over 100 rounds.
 Seeds do peak early and give accuracy back---at $\varepsilon = 1$ one peaks at
@@ -115,7 +130,7 @@ headline claims.
 
 \subsection{Ablations}
 
-We vary one factor at a time at $\varepsilon \in \{1,\infty\}$ with three seeds per cell. On HAR only local epochs and the clipping norm vary: the federation size is fixed by the data split and there is no Dirichlet parameter.
+We vary one factor at a time at $\varepsilon \in \{1,\infty\}$ with three seeds per cell. On HAR only local epochs and the clipping norm vary: the federation size is fixed by the data split and there is no Dirichlet parameter. The ablation sweep ran in its own session, whose baseline sits about $2$~J/round above Table~\ref{tab:perround}'s, so energies here are compared within this sweep only.
 
 \textbf{Under a tight budget, the model becomes noise-limited.} At $\varepsilon=1$ on HAR, neither local epochs nor clipping norm moves final accuracy outside the $\pm 0.041$ across-seed floor of these cells. With $\sigma\approx10$, injected noise dominating these settings, tuning them does not improve the private model.
 
@@ -127,19 +142,20 @@ We vary one factor at a time at $\varepsilon \in \{1,\infty\}$ with three seeds 
 
 \subsection{Carbon Cost by Grid}
 
-Table~\ref{tab:carbon} and Fig.~\ref{fig:carbon} scale the measured HAR
+Table~\ref{tab:carbon} scales the measured HAR
 energy to 1000 runs and apply published grid carbon
 intensities~\cite{energy2024yearly}; the scaling repeats the measured
 workload rather than extrapolating to other hardware. The cost attributable to privacy
 ranges from $106$--$148$~gCO$_2$eq on Algeria's gas-dominated grid to
-$5.7$--$7.9$~g in Norway, a factor of $18.8$ for the same computation and the
-same guarantee.
+$5.7$--$7.9$~g in Norway. The factor of $18.8$ between them is the ratio of
+the two grid intensities and would be identical for non-private training; what
+privacy contributes is the premium itself, which is a quantity in grams and
+therefore geographic.
 
 \begin{table}[t]
 \centering
-\caption{Carbon per 1000 HAR runs (gCO$_2$eq) at grid intensities of 26, 56,
-344, 369, 488 and 631~gCO$_2$eq/kWh~\cite{energy2024yearly}. DP: mean over
-private budgets; Privacy: range of DP minus no-DP.}
+\caption{Carbon per 1000 HAR runs (gCO$_2$eq) at intensities of 26, 56, 344,
+369, 488 and 631~g/kWh~\cite{energy2024yearly}. Privacy: DP minus no-DP.}
 \label{tab:carbon}
 \footnotesize
 \begin{tabular}{lrrr}

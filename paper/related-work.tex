@@ -14,9 +14,8 @@ lacoste2019quantifying}. Comparisons of those tools against instrumented hardwar
 estimates diverge substantially from measurement~\cite{bouza2023estimate,
 aquino2025towards}, which is why we read NVML counters rather than model power
 from device ratings. Patterson et al.~\cite{patterson2021carbon} established that
-where a job runs changes its emissions by $5$--$10\times$; our geographic
-result is that finding applied to a parameter, $\varepsilon$, rather than to
-a schedule.
+where a job runs changes its emissions by $5$--$10\times$; we apply that to
+the premium a privacy budget adds.
 
 \subsection{Energy and differential privacy in federated learning}
 
@@ -46,14 +45,18 @@ it~\cite{wei2021user}; the same optimum reappears for personalized
 FL~\cite{wei2023personalized}, for query and reply counts~\cite{zhou2023optimizing}, and in control
 formulations that adapt noise and rounds jointly~\cite{yuan2025optimal}. These results
 say where to stop. What they do not say is what continuing costs, because
-the round is an abstract unit in them. Our measurements price it: at
-$\varepsilon = 0.5$ on CIFAR-10, two thirds of a run's joules are spent after
-the accuracy peak that this literature predicts.
+the round is an abstract unit in them. Our measurements price it: on CIFAR-10 at $\varepsilon = 0.5$ the peak this
+literature predicts falls at round 8 of 30, and the rounds after it are
+priced in joules below.
 
 \subsection{Our position}
 
 We therefore contribute the missing empirical axis: hardware-counter energy
-swept across $\varepsilon$ under whole-run client-level
-accounting~\cite{abadi2016deep, geyer2017differentially}, decomposed into a fixed per-round overhead
-and a convergence penalty, and reported as energy-to-target-accuracy rather
-than energy per round or energy per run.
+swept across $\varepsilon$ under whole-run per-client
+accounting~\cite{abadi2016deep}, decomposed into a per-round overhead and a
+convergence penalty, and reported as energy-to-target-accuracy rather than
+energy per round or energy per run. Our guarantee is example-level and local,
+weaker than the client-level protection of~\cite{geyer2017differentially,
+wei2020federated}; the energy question is orthogonal to that choice, and the
+per-round overhead we measure is the cost of the per-sample gradients that
+both require.

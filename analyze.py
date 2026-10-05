@@ -212,6 +212,67 @@ def noise_floor(by_eps):
     return worst_w, worst_pct
 
 
+def per_round_floor(by_eps):
+    """Worst within-condition across-seed spread of NET ENERGY PER ROUND.
+
+    noise_floor() is defined on board power, which is the right scale for a
+    power claim and the wrong one for an energy-per-round claim: the two
+    differ by the round duration, which also varies across seeds. A reviewer
+    rightly caught us comparing a spread in J/round against a floor in W, so
+    every claim now meets a floor measured on its own quantity.
+    """
+    worst_j, worst_pct = 0.0, 0.0
+    for group in by_eps.values():
+        if len(group) < 2:
+            continue
+        jr = np.array([total_energy(r, True) / len(r["rounds"])
+                       for r in group])
+        worst_j = max(worst_j, float(jr.std(ddof=1)))
+        worst_pct = max(worst_pct, float(100 * jr.std(ddof=1) / jr.mean()))
+    return worst_j, worst_pct
+
+
+def permutation_f_test(groups, draws=200000, seed=0):
+    """(F, p) for 'these conditions differ', by permuting the seed labels.
+
+    A floor comparison answers the wrong question for an ordering claim: the
+    floor is the spread of one condition's seeds, while the quantity on trial
+    is the spread of the condition MEANS, which with three seeds each is
+    narrower by about root-three. With five conditions of three runs there is
+    no asymptotics to lean on, so we permute the fifteen measurements across
+    the budget labels and read the p-value off the null directly. No
+    distributional assumption, and it is exactly the question the claim makes.
+    """
+    groups = [np.asarray(g, float) for g in groups if len(g) > 1]
+    if len(groups) < 2:
+        return float("nan"), float("nan")
+
+    def f_stat(gs):
+        k = len(gs)
+        n = sum(len(g) for g in gs)
+        grand = np.mean(np.concatenate(gs))
+        between = sum(len(g) * (g.mean() - grand) ** 2 for g in gs)
+        within = sum(((g - g.mean()) ** 2).sum() for g in gs)
+        if within <= 0:
+            return float("inf")
+        return (between / (k - 1)) / (within / (n - k))
+
+    observed = f_stat(groups)
+    sizes = [len(g) for g in groups]
+    pool = np.concatenate(groups)
+    rng = np.random.default_rng(seed)
+    hits = 0
+    for _ in range(draws):
+        shuffled = rng.permutation(pool)
+        cut, parts = 0, []
+        for size in sizes:
+            parts.append(shuffled[cut:cut + size])
+            cut += size
+        if f_stat(parts) >= observed - 1e-12:
+            hits += 1
+    return float(observed), (hits + 1) / (draws + 1)
+
+
 def accuracy_floor(by_eps):
     """Worst within-condition across-seed SD of FINAL accuracy.
 
@@ -892,10 +953,17 @@ def latex_tables(by_eps, targets, sigma_from=None, realised_eps=None):
     print(f"%   overhead across budgets {trend}")
     print(f"%   accuracy noise floor: +/-{acc_abs:.4f} absolute "
           f"({acc_pct:.2f}% of mean final accuracy)")
-    verdict = ("inside" if spread_pct <= floor_pct else "OUTSIDE")
-    print(f"%   -> the spread is {verdict} the floor"
-          + ("" if spread_pct <= floor_pct
-             else "  <-- the epsilon-independence claim does NOT hold here"))
+    jr_floor, jr_floor_pct = per_round_floor(by_eps)
+    f_stat, p_value = permutation_f_test(
+        [[total_energy(r, True) / len(r["rounds"]) for r in g]
+         for g in private.values()])
+    print(f"%   per-round energy floor (same quantity as the spread): "
+          f"+/-{jr_floor:.2f} J/round ({jr_floor_pct:.1f}% of the private mean)")
+    print(f"%   permutation F-test for ANY dependence on epsilon: "
+          f"F={f_stat:.2f}, p={p_value:.3f}")
+    print("%   -> " + ("the budgets differ resolvably; do NOT claim "
+                       "epsilon-independence" if p_value < 0.05 else
+                       "no resolvable dependence on epsilon (p >= 0.05)"))
 
     print("\n% ---- Table: energy to target accuracy ----")
     cols = "r" * len(targets)

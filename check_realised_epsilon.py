@@ -69,6 +69,37 @@ def spent_epsilon(sigma: float, n: int, batch_size: int, steps: int,
     return accountant.get_epsilon(delta=delta)
 
 
+def worst_case_epsilon(run, sizes):
+    """Epsilon if a client were sampled in EVERY round: the true worst case.
+
+    Sigma is calibrated against R * fraction_train steps, an expectation. With
+    participation random and no subsampling amplification claimed, nothing in
+    the protocol stops a client from being drawn every round, and then it
+    takes R * E * ceil(n/B) steps. That bound, not the expectation, is what a
+    guarantee has to hold against -- so the number here is what the reported
+    epsilon would have to be to be an upper bound at all. Returns
+    (worst_eps, client_id) or (None, None) for the non-private baseline.
+    """
+    from energyfl import dp
+
+    cfg = run["config"]
+    if not dp.is_private(cfg["epsilon"]):
+        return None, None
+    batch_size, epochs = cfg["batch_size"], cfg["local_epochs"]
+    worst, worst_pid = -1.0, None
+    for pid, n in enumerate(sizes):
+        sigma = dp.noise_multiplier_for(
+            epsilon=float(cfg["epsilon"]), n_examples=n,
+            batch_size=batch_size, num_rounds=cfg["num_rounds"],
+            fraction_train=cfg["fraction_train"], local_epochs=epochs,
+        )
+        steps = cfg["num_rounds"] * epochs * dp.steps_per_epoch(n, batch_size)
+        eps = spent_epsilon(sigma, n, batch_size, steps, cfg["delta"])
+        if eps > worst:
+            worst, worst_pid = eps, pid
+    return worst, worst_pid
+
+
 def check_run(run, sizes, verbose=False):
     """Returns (target_eps, worst_spent, worst_client, participation counts)."""
     from energyfl import dp
@@ -146,6 +177,9 @@ def main():
     ap.add_argument("results", type=Path)
     ap.add_argument("--verbose", action="store_true",
                     help="one line per client per run")
+    ap.add_argument("--worst-case", action="store_true",
+                    help="also report epsilon under participation in EVERY "
+                         "round, the bound a guarantee must hold against")
     ap.add_argument("--json", dest="json_out", type=Path, default=None,
                     help="write {epsilon: worst spent epsilon} for "
                          "analyze.py --latex --realised-eps")
@@ -204,6 +238,26 @@ def main():
             worst_by_eps[key] = max(worst_by_eps.get(key, 0.0), worst)
         args.json_out.write_text(json.dumps(worst_by_eps, indent=2, sort_keys=True))
         print(f"wrote worst spent epsilon per condition to {args.json_out}")
+
+    if args.worst_case:
+        print("\nWorst case: epsilon if a client joined every round "
+              f"({one['num_rounds']} of {one['num_rounds']}), against the "
+              f"{one['num_rounds'] * one['fraction_train']:.0f} the "
+              "accountant was calibrated for.\n")
+        seen = {}
+        for run in runs:
+            target = run["config"]["epsilon"]
+            worst, pid = worst_case_epsilon(run, sizes_for(run["config"]))
+            if worst is None:
+                continue
+            key = str(target)
+            if worst > seen.get(key, (0.0, None))[0]:
+                seen[key] = (worst, pid)
+        for key in sorted(seen, key=float):
+            worst, pid = seen[key]
+            print(f"  target eps {key:>4}   worst case {worst:.4f}   "
+                  f"({100 * (worst / float(key) - 1):+.0f}%, client {pid})")
+        print("\nThis is the number a claimed upper bound would have to use.")
 
     print()
     if breaches:

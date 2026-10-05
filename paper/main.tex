@@ -35,22 +35,28 @@ k.hamouid@univ-batna2.dz}
 
 \maketitle
 
+% Raises IEEEtran's "et al." threshold to six names; see refs.bib.
+\bstctlcite{BSTcontrol}
+
 \begin{abstract}
 Differential privacy in federated learning is evaluated along two axes,
 privacy and utility. On battery-powered edge devices a third decides whether a
 configuration is deployable at all, and it is not reported. We measure the
-energy cost of client-level differential privacy with NVML hardware counters
-differenced around each federated round, sweeping the privacy budget on
-UCI-HAR, whose clients are the individual study participants, and on CIFAR-10.
+energy cost of example-level differential privacy applied locally at each
+client, with NVML hardware counters differenced around each federated round,
+sweeping the privacy budget on UCI-HAR, whose clients are the individual study
+participants, and on CIFAR-10.
 The cost separates in two. A fixed per-round overhead from per-sample
-gradients and clipping costs $+51\%$ on HAR and $+34\%$ on CIFAR-10, in
-neither case ordered in $\varepsilon$; everything budget-dependent acts through the
+gradients and clipping costs $+51\%$ on HAR and $+34\%$ on CIFAR-10, with no
+dependence on $\varepsilon$ that a permutation test over seeds resolves
+($p = 0.27$ and $p = 0.79$); everything budget-dependent acts through the
 number of rounds required, and is the larger term. Measured as
 energy-to-target-accuracy, privacy is free at $0.40$ accuracy on HAR for $\varepsilon \geq 1$,
 $5.7\times$ at $0.70$, and unbounded at $0.85$, which no budget we tested
 reaches at any expenditure. Because the cost is paid in joules it inherits the
-local carbon intensity, an $18.8\times$ range between Algeria's grid and
-Norway's for an identical guarantee. We also report a measurement hazard:
+local carbon intensity: the premium attributable to privacy alone is
+$106$--$148$~gCO$_2$eq per 1000 runs on Algeria's grid against $5.7$--$7.9$~g
+in Norway, a quantity the privacy-utility framing cannot express. We also report a measurement hazard:
 running the privacy accountant's noise calibration inside the timed loop
 reproduced an entire apparent $\varepsilon$ trend.
 \end{abstract}

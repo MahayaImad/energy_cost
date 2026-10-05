@@ -16,30 +16,35 @@ accuracy measures generalization to people the federation never saw. The
 partition is given by who contributed the data rather than by a heterogeneity
 parameter. We train on the raw inertial signals (nine channels, 128 samples
 per window) with a three-block 1D CNN and global average pooling ($37$k
-parameters) for 100 rounds. Local train and validation sets are split within
-each activity class, in file order, discarding the straddling window: windows
-overlap by $50\%$, so a random split would separate two halves of the same
-window, and participants perform the six activities in blocks, so a single
-ordered cut would leave a client missing classes.
+parameters) for 100 rounds. Local train and validation sets are split
+within each activity class, in file order, discarding the straddling window:
+windows overlap by $50\%$, so a random split would leak, and the activities
+come in blocks, so one ordered cut would drop classes.
 
 \textbf{CIFAR-10} is secondary: a five-layer CNN ($62$k parameters) across 20
 clients over 30 rounds, partitioned by a Dirichlet distribution over labels at
 $\alpha = 0.5$~\cite{hsu2019measuring}.
 
 The HAR round budget comes from the non-private convergence curve rather than
-from convenience. Under client-level accounting the number of rounds enters
-the privacy calculation directly, so it is not a free parameter.
+from convenience. Under whole-run accounting the number of rounds enters the
+privacy calculation directly, so it is not a free parameter.
 
 \subsection{Privacy Accounting}
 
-We enforce client-level local differential privacy: each client holds its own
-$(\varepsilon, \delta)$ budget over the entire run, and the server is
-untrusted. The budget is accounted over every local SGD step a client takes
-across every round it participates in, not per round and not per local epoch.
-For a client with $n$ examples, batch $B$, $R$ rounds, sampling fraction $q_c$
-and $E$ local epochs:
+We enforce \emph{example-level} differential privacy, applied locally:
+Opacus~\cite{yousefpour2021opacus} clips and noises per-sample gradients
+inside local training, so the guarantee protects one of a client's own
+examples, the noise is added before anything leaves the device, so it holds
+against an untrusted server, and each client holds its own $(\varepsilon,
+\delta)$ budget over the whole run. This is weaker than the client-level
+guarantee of~\cite{geyer2017differentially, wei2020federated}, which noises
+the entire client update and conceals participation itself; the per-round
+overhead we measure is the per-sample gradient work both need. The budget is
+accounted over every local SGD step across every round a client joins, not per
+round and not per epoch. For a client with $n$ examples, batch $B$, $R$
+rounds, sampling fraction $q_c$ and $E$ local epochs:
 %
-\begin{equation}
+\begin{equation}\label{eq:steps}
   s_{\text{total}} = R \, q_c \, E \, \lceil n / B \rceil
 \end{equation}
 %
@@ -53,21 +58,20 @@ than $B/n$, and we calibrate at the rate the sampler uses. We claim no
 amplification by client subsampling, which would require secure aggregation or
 a shuffler.
 
-One consequence of precomputing is that $\sigma$ is calibrated on the
-\emph{expected} number of participations, $R \, q_c$, while the realised count
-is binomial, so a client sampled more often than expected spends more than the
-nominal budget. Recomputing each client's spent $\varepsilon$ from the
-participation log, the worst client overspends in every private run we
-measured, by $4$--$22\%$ (Table~\ref{tab:perround}). The target
-$\varepsilon$ is therefore a design parameter rather than a certified bound;
-certifying one requires capping participation per client.
+The $q_c$ in \eqref{eq:steps} makes $s_{\text{total}}$ an \emph{expected}
+participation count, and nothing in the protocol bounds the realised one,
+which is binomial. So $\sigma$ is calibrated optimistically: recomputing each
+client's spent $\varepsilon$ from the participation log, the worst client
+overspends in every private run we measured, by $4$--$22\%$
+(Table~\ref{tab:perround}, last column). A guarantee that must hold
+unconditionally has to drop $q_c$ and calibrate against $R \, E \, \lceil n/B
+\rceil$, or cap participation per client; we report the target
+$\varepsilon$ as the design parameter it is, with the realised worst case
+beside it.
 
 Because per-client dataset sizes differ, $\sigma$ differs per client, and the
 two datasets sit in different regimes: a HAR client holds far fewer examples,
-which raises the sampling rate, and runs a longer schedule. Both push $\sigma$
-up. The consequence for design is that the round budget is not free under
-local DP, since extending training to reach convergence raises $\sigma$ for
-every round.
+which raises the sampling rate, and runs a longer schedule. Both push $\sigma$ up.
 
 \subsection{Energy Measurement}
 
@@ -79,17 +83,23 @@ share one GPU in simulation, so a round-level window captures the full cost
 regardless of actor scheduling, whereas measuring inside each client would
 double-count concurrent work.
 
-We report energy gross and net of an idle baseline, sampled per run after
-board power settles, since a card does not reach its floor the moment a run
+Every energy figure in this paper is net of the idle baseline unless a column
+is labelled Gross. We report both, the baseline sampled per run after board
+power settles, since a card does not reach its floor the moment a run
 ends and probing during that tail reads a busy baseline. Baselines are checked
 against the sweep median, and outliers are discarded. Net energy subtracts the
 baseline over the wall clock the counter covers, excluding start-up, central
-evaluation and teardown. The three seeds also give measurement noise floors,
-taken as the worst within-condition spread across seeds --- one for power and
-one for final accuracy --- and reported in Section~\ref{sec:Results}; no
-smaller difference is treated as an effect.
+evaluation and teardown. The three seeds also give measurement noise floors, each the worst
+within-condition spread across seeds and each measured on the quantity it
+bounds --- energy per round, board power, final accuracy --- and reported in
+Section~\ref{sec:Results}; no smaller difference is treated as an effect.
+Where a claim is about an ordering across budgets rather than a single
+difference, a floor is the wrong instrument, because the quantity on trial is
+the spread of the condition means: there we permute the seed labels across
+the five private budgets and report the $p$-value of the resulting $F$.
 
 \subsection{Experimental Controls}
+\label{sec:controls}
 
 We fix the clipping norm $C = 1.0$ for all $\varepsilon$ values to isolate 
 the effect of privacy. We verify each round that the number of optimizer steps 
@@ -103,13 +113,12 @@ Instead, we assess reproducibility across multiple random seeds.
 \subsection{Limitations}
 
 Clients are virtual and share one GPU, although on HAR each holds one real
-participant's data, so relative comparisons hold while absolute per-device
-joules do not transfer. CPU RAPL counters were unavailable, so measurement is
+participant's data. CPU RAPL counters were unavailable, so measurement is
 GPU-only and communication energy is modeled. The workload does not saturate
 the device, which is why net figures accompany gross ones. Per-channel
 standardization constants come from the training split and are global across
 clients, so a real deployment would have to agree them without pooling raw
-data. Finally, the HAR round budget is set from the non-private convergence
-curve, so private conditions inherit a longer schedule than any of them needs
-and a correspondingly larger $\sigma$; their accuracies are a lower bound on
-what a per-$\varepsilon$ tuned budget would give.
+data. And the HAR round budget is set from the non-private convergence curve,
+so private conditions inherit a longer schedule than any of them needs and a
+larger $\sigma$ with it; their accuracies are a lower bound on what a
+per-$\varepsilon$ tuned budget would give.

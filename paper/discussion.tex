@@ -9,19 +9,22 @@
 
 \subsection{Privacy Sets a Quality Ceiling}
 
-Separating the two costs matters because they admit different remedies: the fixed overhead is an implementation problem, the convergence penalty a scheduling one, and per-round energy sees only the first.
-
-Privacy does not impose a constant energy overhead: on HAR it is negligible at $0.40$ accuracy and unbounded at $0.85$, beyond which no expenditure buys the target. Privacy and target utility should therefore be chosen jointly rather than sequentially.
-
-The reason is that the round budget is itself spent out of the privacy budget: more participation requires more noise for the same $\varepsilon$, so training longer can become counterproductive. A stopping rule is needed, although where it falls depends on the dataset and the budget.
+The two costs admit different remedies --- the per-round overhead is an
+implementation problem, the convergence penalty a scheduling one --- and
+per-round energy sees only the first. For a designer the consequence is that
+privacy has no single energy multiplier: it is nearly free at a low accuracy
+target and unreachable at a high one, so the budget and the target have to be
+chosen together rather than in sequence. The reason is that the round budget
+is itself spent out of the privacy budget: more participation requires more
+noise for the same $\varepsilon$, so training longer can stop helping, and a
+stopping rule is needed even though where it falls depends on the dataset and
+the budget.
 
 \subsection{When the Model Is Noise-Limited, Tuning Is Not the Lever}
 
-Our HAR ablations are negative and useful. At $\varepsilon = 1$ neither local
-epochs nor the clipping norm moves accuracy outside the $\pm 0.041$
-across-seed floor of the ablation cells, so a practitioner responding to a disappointing private model
-by sweeping hyperparameters will spend considerable energy to land where they
-started. This does not hold in every regime, and CIFAR-10 shows why: there the
+Our HAR ablations are negative and useful: a practitioner responding to a
+disappointing private model by sweeping local epochs or the clipping norm will
+spend considerable energy to land where they started. This does not hold in every regime, and CIFAR-10 shows why: there the
 private model retains more signal, and the same settings can be got badly
 wrong. Increasing local work per round is the standard way to reduce
 communication in federated learning; under DP it stops paying on HAR and
@@ -38,10 +41,9 @@ Instrumentation attached to a privacy mechanism tends to scale with the
 privacy parameter, so its cost mimics the effect under study. The accountant's
 noise-calibration search is the case we hit: running inside the federated loop, it
 reproduced our entire observed $\varepsilon$ trend, while executed step counts
-stayed flat, and nothing in the resulting numbers announces this. We recommend
-three controls: derive noise multipliers before measurement begins, verify per
-round that executed and calibrated step counts agree, and randomize run order
-so that drift over a sweep cannot be mistaken for an $\varepsilon$ effect.
+stayed flat, and nothing in the resulting numbers announces this. The three controls of
+Section~\ref{sec:controls} remove it, and we would apply them to any energy
+study of a privacy mechanism.
 
 \subsection{Threats to Validity}
 
@@ -50,8 +52,10 @@ but the absolute joules do not; confirming them on physical hardware is the
 immediate next step. Measurement is GPU-only and communication energy is
 modelled --- for a $0.15$--$0.24$~MB model over tens of rounds we expect it
 small, but have not shown it. Two datasets bound the effects rather than
-establishing them. And our accounting claims no amplification by subsampling,
-so these are the costs under the weakest trust assumptions, not the best
-achievable --- while in the other direction the realised participation count
-puts the worst client above its nominal budget in every private run, which a
-deployment would have to cap.
+establishing them. Our guarantee is example-level and local: a client-level mechanism would noise
+the whole update instead, changing the accuracy cost but not the per-sample
+gradient work that produces the per-round overhead. And we claim no
+amplification by subsampling, so these are costs under weak trust assumptions,
+not the best achievable --- while in the other direction the realised
+participation count puts the worst client above its nominal budget in every
+private run.

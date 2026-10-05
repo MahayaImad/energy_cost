@@ -1,9 +1,15 @@
 """Noise calibration and DP-SGD training.
 
-We enforce client-level local DP with an untrusted server: each client holds
-its own (epsilon, delta) budget over the whole federated run, accounted over
-every local SGD step it takes in every round it joins -- not per round, and
-not per epoch. For a client with n local training examples,
+What this gives, precisely. Opacus clips and noises PER-SAMPLE gradients
+inside local training, so the guarantee is EXAMPLE-LEVEL: it protects one of
+a client's own training examples. It is local -- the noise is added on the
+client, before anything leaves it, so it holds against an untrusted server --
+and the budget is held per client over the whole federated run, accounted
+over every local SGD step in every round that client joins, not per round and
+not per epoch. It is NOT client-level (user-level) DP, which would clip and
+noise the whole client update and hide the client's participation itself;
+calling it that was a mislabelling, caught in review. For a client with n
+local training examples,
 
     total_steps = num_rounds * fraction_train * local_epochs * ceil(n / B)
 
@@ -18,8 +24,15 @@ reports a per-round epsilon while the real budget compounds across rounds --
 wrong by roughly the round count.
 
 Do not claim amplification by subsampling. It needs secure aggregation or a
-shuffler, neither of which we assume, so the reported epsilon is an upper
-bound.
+shuffler, neither of which we assume.
+
+And note which way the remaining slack runs. The fraction_train factor above
+is an EXPECTED participation count, while the realised count is binomial and
+unbounded above by anything in the protocol, so a client drawn more often
+than expected spends more than the target. The reported epsilon is therefore
+optimistic, not an upper bound: check_realised_epsilon.py measures the
+overspend from the participation logs, and --worst-case prints the epsilon
+that full participation would cost.
 
 Clipping norm C is fixed across all epsilon; tuning it per budget would
 confound the privacy-utility comparison.
