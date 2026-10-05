@@ -208,7 +208,12 @@ def _har_partition(partition_id: int, num_partitions: int, batch_size: int):
 
 # -------------------------------------------------------------- CIFAR-10 data
 
-_fds = None          # cached across clients in the same Ray worker
+# Keyed on the partitioner's arguments, NOT a single slot. A process that
+# asks for two seeds must get two partitions: during a sweep each run has its
+# own process so one slot would do, but any tool that loops over seeds in one
+# process -- the epsilon audit does -- would otherwise be served the first
+# seed's partition under every later seed's name, silently.
+_fds_cache: dict = {}
 _testloader = None
 _TRANSFORMS = Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
@@ -237,9 +242,9 @@ def load_partition(partition_id: int, num_partitions: int, batch_size: int,
     from flwr_datasets import FederatedDataset
     from flwr_datasets.partitioner import DirichletPartitioner
 
-    global _fds
-    if _fds is None:
-        _fds = FederatedDataset(
+    key = (int(num_partitions), float(alpha), int(seed))
+    if key not in _fds_cache:
+        _fds_cache[key] = FederatedDataset(
             dataset=CIFAR_HUB_ID,
             partitioners={"train": DirichletPartitioner(
                 num_partitions=num_partitions,
@@ -251,7 +256,7 @@ def load_partition(partition_id: int, num_partitions: int, batch_size: int,
             )},
         )
 
-    split = _fds.load_partition(partition_id)
+    split = _fds_cache[key].load_partition(partition_id)
     split = split.train_test_split(test_size=0.2, seed=seed)
     split = split.with_transform(_apply_transforms)
     return (
