@@ -1,0 +1,337 @@
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[margin=2.3cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{times}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=black,urlcolor=black,citecolor=black,bookmarks=false]{hyperref}
+
+\definecolor{quotegray}{gray}{0.35}
+\definecolor{rulegray}{gray}{0.75}
+
+% Reviewer comments, set apart from our replies.
+\newenvironment{rc}%
+  {\medskip\par\noindent\begin{list}{}{\leftmargin=1.2em\rightmargin=0.6em}\item
+   \color{quotegray}\itshape\small}%
+  {\end{list}\medskip}
+
+% Section headings without titlesec, which this TeX installation lacks.
+\makeatletter
+\renewcommand{\section}{\@startsection{section}{1}{0pt}%
+  {1.4em}{0.5em}{\large\bfseries}}
+\renewcommand{\subsection}{\@startsection{subsection}{2}{0pt}%
+  {1.1em}{0.4em}{\normalsize\bfseries}}
+\makeatother
+\setlength{\parskip}{0.45em}
+\setlength{\parindent}{0pt}
+\renewcommand{\arraystretch}{1.15}
+
+\begin{document}
+
+\begin{center}
+{\large\bfseries Response to Reviewers}\\[0.35em]
+{\itshape The Energy Cost of Privacy in Federated Learning}\\[0.2em]
+cSIS 2026 --- Track 1, Green \& Intelligent Computing
+\end{center}
+
+\hrule height 0.4pt
+\medskip
+
+We thank both reviewers. Two of the findings are substantial and we have
+accepted them in full: the privacy guarantee was mislabelled (R2.3), and our
+first contribution rested on an unreconciled discrepancy between two
+measurement passes (R2.1). Both are now fixed in a way that makes the error
+impossible to repeat, and the second has become a result in its own right.
+
+\textbf{Where every number now comes from.} The paper no longer contains a
+figure typed by hand. All tables and all in-text values are printed by the
+analysis script from the same arrays, on the committed measurements:
+
+\medskip
+{\footnotesize\ttfamily
+analyze.py results\_har/ -{}-latex -{}-realised-eps spent\_har.json \\
+\hspace*{1.2em}-{}-targets 0.4,0.5,0.7,0.85 \hfill \# Tables I, II, III\\
+analyze.py results/ -{}-latex -{}-realised-eps spent\_cifar.json \hfill \# CIFAR-10 check\\
+analyze.py results\_har/ -{}-paper \hfill \# floors, hardware, $\sigma$\\
+analyze.py results\_ablation\_har/ -{}-ablation \hfill \# Section IV-E, HAR\\
+analyze.py results\_ablation/ -{}-ablation \hfill \# Section IV-E, CIFAR-10\\
+per\_seed\_peak.py results\_har/ \textless eps\textgreater \hfill \# stopping rounds\\
+check\_realised\_epsilon.py results\_har/ -{}-worst-case \hfill \# participation audit\\
+analyze.py results\_har/ -{}-no-peak-markers \hfill \# Figures 1 and 2\\
+}
+\medskip
+
+The paper is now \textbf{6 pages}, verified by compilation, with no \LaTeX{}
+warnings and no unresolved references.
+
+\section{Reviewer 1}
+
+\begin{rc}
+The paper runs one page over the six-page limit.
+\end{rc}
+
+Fixed: 6 pages. The cuts are the ones R2.6 identified --- Section V-A reduced
+to its interpretive content, V-B's restatement of IV-E removed, the carbon
+figure dropped because Table III is the same six numbers, captions shortened,
+and the overlap between the methodology's limitations and Section V-E's
+threats merged into one place. Section V-D, the measurement hazard (numbered
+V-E in the submitted version), is untouched; its three controls now
+cross-reference the methodology instead of restating it.
+
+\begin{rc}
+Uses ``Index Terms'' rather than ``Keywords,'' and sets the title in non-bold
+font. Also, figure and table captions are too long.
+\end{rc}
+
+All three fixed. The keywords heading is renamed, the title is bold, and every
+caption is now at most three lines, with the numbers moved into the text where
+they can be read against the surrounding argument.
+
+\medskip
+Two numbers in the reviewer's summary of our contribution have changed, and we
+note them so the summary can be re-read against the corrected paper: the
+moderate-target cost is \textbf{5.7$\times$} ($1710/301 = 5.68$, as R2.2
+computed), and the carbon factor is \textbf{18.8$\times$}, now presented as
+context rather than as a result about privacy, for the reason R2.4 gives.
+
+\section{Reviewer 2}
+
+\subsection{Two baselines and two noise floors for the same measurement}
+
+The reviewer is right, and the discrepancy had two independent causes.
+
+\textbf{The baselines.} Figure 2 and the opening of Section IV were taken from
+a later re-run of the $\varepsilon = \infty$ condition alone, which overwrote
+the original sweep's files --- identical filenames, identical run-order seed
+--- and was never committed. Table I was computed from the original sweep. We
+can defend only the committed data, so the re-run is gone and the whole paper
+now comes from the original sweep: baseline \textbf{13.98 J/round} (14.0 in
+Table I), mean overhead \textbf{$+51\%$}, range $+43.4\%$ to $+62.2\%$,
+board-power floor \textbf{7.80\%}. The 14.5\,J / $+45\%$ / 8.2\% / 9.46\% set
+is withdrawn.
+
+\textbf{The floor comparison was the wrong instrument}, and this is the more
+important half of the reviewer's point. Two things were wrong with it:
+
+\begin{itemize}\itemsep0.2em
+\item The 12.5\% spread is a spread in \emph{net energy per round}, while the
+7.80\% floor is a spread in \emph{board power}. The two differ by the round
+duration, which also varies across seeds. Every floor in the paper is now
+measured on the quantity it bounds. On energy per round the floor is
+$\pm 2.58$\,J/round, \textbf{12.0\%} --- not 7.8\% --- so the 12.5\% spread
+sits essentially on it.
+\item Even with matched units, a floor is the spread of \emph{one} condition's
+seeds, whereas the claim is about the spread of \emph{five condition means},
+which with three seeds each is narrower by about $\sqrt{3}$. So we test the
+claim instead of comparing it to a floor: permuting the seed labels across the
+five private budgets gives \textbf{$F = 1.46$, $p = 0.27$} on HAR and
+\textbf{$F = 0.46$, $p = 0.79$} on CIFAR-10.
+\end{itemize}
+
+On the specific contrast the reviewer raises, $+43.4\%$ at $\varepsilon = 1$
+against $+62.2\%$ at $\varepsilon = 4$: it is not resolvable. The three seeds
+of the $\varepsilon = 4$ condition span 20.9 to 24.1\,J/round on their own, and
+the overheads are not ordered in $\varepsilon$ ($\varepsilon = 8$ sits below
+$\varepsilon = 4$).
+
+Section IV-A is retitled \emph{The Per-Round Cost Does Not Track the Budget}
+and states the weaker claim the data supports: no resolvable dependence on
+$\varepsilon$, and explicitly \textbf{no claim of equality} --- three seeds per
+budget bound a budget effect at about the size of the overhead's own scatter,
+not at zero.
+
+\subsection{Headline figures not reproducible from the tables}
+
+Every one is corrected, and the text values are now printed from the same
+arrays as the tables rather than transcribed.
+
+\medskip
+{\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Claim & Submitted & Corrected \\
+\midrule
+ratio at the 0.50 target & 1.17--2.10 & \textbf{1.28--1.79} (as the reviewer computed) \\
+moderate-target cost & 5.8$\times$ & \textbf{5.7$\times$} ($1710/301 = 5.68$) \\
+non-private at 0.85 & 878\,J, 57.7 rounds & \textbf{839\,J, 57.0 rounds} \\
+post-peak energy, HAR $\varepsilon = 0.5$ & 2477\,J over 83 rounds & \textbf{withdrawn} (see 4) \\
+ablation per-round at $\varepsilon = 1$ & 29\,J & \textbf{22\,J} \\
+\bottomrule
+\end{tabular}}
+\medskip
+
+On the 2477\,J: the reviewer's arithmetic is what exposed it. 2477\,J over 83
+rounds is 29.8\,J/round against Table I's 20.3\,J net, because that number came
+from the withdrawn pass. On the committed data HAR has no resolvable stopping
+round at any budget, so the claim is gone rather than rescaled.
+
+On the ablation's 29\,J: the corrected value is $22.03 \pm 0.36$\,J/round, and
+the residual 2\,J against Table I's $20.05 \pm 0.39$ is a genuine
+between-session offset --- the ablation sweep ran separately, with its own idle
+baseline. It is larger than either sweep's across-seed spread, so we now state
+in Section IV-E that ablation energies are compared \emph{within} the ablation
+sweep only, and we make no cross-sweep energy comparison anywhere.
+
+On gross versus net: stated once in Section III-C (``every energy figure in
+this paper is net of the idle baseline unless a column is labelled Gross'') and
+again at the head of Section IV. Table I labels its gross column; every other
+energy in the paper is net.
+
+\subsection{The guarantee is mislabelled, and $q_c$ assumes what we disclaim}
+
+Accepted in full, on both halves.
+
+\textbf{The label.} Opacus clips and noises per-sample gradients inside local
+training, so the guarantee is \textbf{example-level}, applied locally, with the
+budget held per client over the whole run. It is not the client-level
+(user-level) DP of [2] and [11], which noises the entire client update and
+conceals participation itself. We have relabelled the abstract, Section I,
+Section II-D, Section III-B, Section V-E and the conclusion, and Section III-B
+now states the relation explicitly: our guarantee is weaker, and the per-round
+overhead we measure is the per-sample gradient work that both mechanisms need,
+so the energy result is orthogonal to the choice between them.
+
+\textbf{The $q_c$ factor.} Also accepted: $q_c$ makes $s_{\text{total}}$ an
+expected participation count, nothing in the protocol bounds the realised one,
+and the reported $\varepsilon$ is therefore \textbf{optimistic rather than an
+upper bound}. We had begun auditing this before the reviews and the audit
+agrees with the reviewer in every run. Recomputing each client's spent
+$\varepsilon$ from the participation logs, the worst client overspends in
+\textbf{all 29 private runs}, by 4\% to 22\%:
+
+\medskip
+{\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+target $\varepsilon$ & 0.5 & 1 & 2 & 4 & 8 \\
+\midrule
+worst spent, UCI-HAR  & 0.570 & 1.122 & 2.285 & 4.250 & 9.112 \\
+worst spent, CIFAR-10 & 0.611 & 1.162 & 2.251 & 4.356 & 8.850 \\
+\bottomrule
+\end{tabular}}
+\medskip
+
+Table I now carries a \emph{Worst $\varepsilon$} column with the HAR values,
+and Section III-B states the remedy the reviewer names: a guarantee that must
+hold unconditionally has to drop $q_c$ and calibrate against
+$R \, E \, \lceil n/B \rceil$, or cap participation per client. The audit script
+has a \texttt{-{}-worst-case} mode that prints the $\varepsilon$ of
+participation in every round, which is the figure such a calibration would have
+to use.
+
+We would rather report this than hide it: the same optimistic calibration is
+common in federated DP simulations, and the audit is a few lines of logging
+plus a replay.
+
+\subsection{Two results carry less information than their framing}
+
+Accepted on both.
+
+\textbf{The post-peak energy share.} The reviewer is right that with per-round
+energy flat, ``83\% of the joules'' is 83 of 100 rounds restated, and right
+that the declines defining those peaks sat below our own floors. A peak is now
+reported only where the peak-to-final drop clears that condition's across-seed
+spread in final accuracy \emph{and} the individual seeds agree on where the
+peak falls. Under that test:
+
+\begin{itemize}\itemsep0.2em
+\item \textbf{HAR fails at every budget.} The largest drop in a mean curve is
+0.032 at $\varepsilon = 1$ against a $\pm 0.042$ spread, and the per-seed peak
+rounds disagree (10, 33, 39 at $\varepsilon = 1$; 16, 54, 65 at
+$\varepsilon = 0.5$). The HAR stopping-round claim is withdrawn and Figure 1 is
+redrawn with no marker, its caption saying why.
+\item \textbf{CIFAR-10 passes at the two tightest budgets.}
+$\varepsilon = 0.5$: drop 0.026 against $\pm 0.010$, seeds peaking at rounds 8,
+8 and 9. $\varepsilon = 1$: drop 0.044 against $\pm 0.014$, seeds between 10
+and 16. At $\varepsilon \ge 2$ the drops fall inside their spreads and we claim
+nothing.
+\end{itemize}
+
+Section IV-C now leads with the peak's position --- round 8 of 30 at
+$\varepsilon = 0.5$ --- and says in the text that the energy fraction tracks
+the fraction of the schedule after the peak precisely because per-round energy
+is flat, so the joules price the tail of a round budget the designer chose. The
+monotone peak ordering 7/11/19/24 is withdrawn: only two budgets resolve a peak
+at all.
+
+\textbf{The carbon factor.} Also accepted. The ratio is the two grid
+intensities and would be identical for non-private training, and the paper now
+says so in Section IV-F. The abstract and Section IV-F lead instead with the
+quantity that is about privacy: the premium attributable to privacy alone,
+106--148\,gCO$_2$eq per 1000 runs on Algeria's grid against 5.7--7.9\,g in
+Norway. The geographic point is framed as context for a federated deployment,
+which cannot relocate the way a data centre can.
+
+\subsection{Reference verification and IEEE formatting}
+
+Thank you for checking these. All are fixed.
+
+\begin{itemize}\itemsep0.2em
+\item \textbf{One author plus ``et al.'' where six are permitted.} This was
+IEEEtran's default name limit rather than per-entry data. An
+\texttt{@IEEEtranBSTCTL} entry now sets the limit to six names and the
+manuscript cites it before the first citation; eight entries now show six
+authors before ``et al.''
+\item \textbf{Missing volume, issue and pages.} The entries that lacked them
+were preprints typed as journal articles, which is why the fields were empty.
+The seven preprints are now \texttt{@misc} entries carrying the arXiv
+identifier, which IEEEtran prints, so nothing claims a volume it does not have.
+Two IEEE entries without volume or pages are genuinely early access and are now
+marked as such.
+\item \textbf{Institutional authors} (NVIDIA, Ember) were being initialised to
+``N. Corporation'' and ``E. Ember''; both are now braced.
+\item \textbf{[16] Anguita et al.} carried a spurious ``and others'' --- the
+paper has exactly five authors --- and the venue was abbreviated to ``Esann''.
+Both corrected, and the entry is cited by its ESANN paper number (es2013-84)
+rather than by the page range that circulates in secondary sources, which we
+could not confirm against the proceedings.
+\item \textbf{[24] Aroussi et al.}, the DOI you asked for:
+\texttt{10.1109/IRASET68627.2026.11538879}. It is now in the entry and prints
+in the reference list. We agree it had to be solid, since it carries the
+closest competing claim in the paper.
+\end{itemize}
+
+\subsection{Page limit}
+
+The submission is now 6 pages, and we took the cut where the reviewer directed
+it. Section V-A is reduced to its interpretive content, V-B no longer restates
+Section IV-E, the carbon figure is dropped because Table III carries the same
+six numbers, the captions are shortened, and the duplication between the
+methodology's limitations and Section V-E's threats is merged. The bibliography
+is tightened in form rather than shortened, since every entry is cited.
+
+\textbf{Section V-D, the accountant-in-the-measurement-window hazard (V-E in
+the submitted version), is untouched}, and we have made it cheaper to act on:
+its three controls now point to the methodology that implements them, so the
+finding and its remedy are each stated once.
+
+\section{Summary of changes}
+
+{\small
+\begin{tabular}{@{}p{5.1cm}p{10.5cm}@{}}
+\toprule
+Location & Change \\
+\midrule
+Abstract, \S I, \S II-D, \S III-B, \S V-E, Conclusion & guarantee relabelled example-level, applied locally, per-client budget over the run \\
+Abstract, \S IV-A, \S V, Conclusion & CIFAR-10 per-round overhead $+60\%$ $\to$ \textbf{$+34\%$}; permutation-test $p$-values added \\
+\S IV opening & floors restated on the quantity each bounds; CIFAR-10 power floor 6.38\% $\to$ \textbf{8.9\%} \\
+\S IV-A & retitled; floor comparison replaced by a permutation test; the $\varepsilon = 4$ contrast addressed \\
+\S III-C, \S IV opening & gross versus net stated explicitly \\
+Table I & \emph{Worst $\varepsilon$} column added; caption shortened \\
+Table II & $\varepsilon = 0.5$ at the 0.50 target shown as 334\,J (12.0)$\ddagger$, two of three seeds, instead of hidden \\
+\S IV-B & 1.17--2.10 $\to$ \textbf{1.28--1.79}; 5.8$\times$ $\to$ \textbf{5.7$\times$}; 878\,J/57.7 $\to$ \textbf{839\,J/57.0} \\
+\S IV-C & rewritten: HAR stopping round withdrawn, CIFAR-10 resolvable at $\varepsilon \le 1$, peak ordering withdrawn, energy share reframed \\
+\S IV-D & 1482\,J / 406\,J / 3.65$\times$ / 0.503 $\to$ \textbf{1076\,J / 677\,J / 1.59$\times$ / 0.490} \\
+\S IV-E & six ablation values corrected; between-sweep offset stated; accuracy floors used for accuracy claims \\
+\S IV-F, Table III & premium leads; ratio 21.4$\times$ $\to$ \textbf{18.8$\times$}, framed as the grids' own; intensities stated in the caption \\
+\S II & ``83\% of a run's joules'' replaced by the peak's position \\
+Figures & carbon figure dropped; Fig. 1 redrawn without a stopping marker; captions shortened \\
+Bibliography & six-name limit, preprints as \texttt{@misc} with arXiv ids, braced institutional authors, Anguita corrected, Aroussi DOI added \\
+\bottomrule
+\end{tabular}}
+
+\end{document}
