@@ -133,6 +133,9 @@ def main():
     ap.add_argument("results", type=Path)
     ap.add_argument("--verbose", action="store_true",
                     help="one line per client per run")
+    ap.add_argument("--json", dest="json_out", type=Path, default=None,
+                    help="write {epsilon: worst spent epsilon} for "
+                         "analyze.py --latex --realised-eps")
     args = ap.parse_args()
 
     paths = sorted(args.results.glob("run_*.json"))
@@ -166,6 +169,18 @@ def main():
               + ("   <-- EXCEEDED" if over else "   ok"))
         if over:
             breaches.append((path.name, target, worst, pid))
+
+    if args.json_out:
+        worst_by_eps = {}
+        for run in runs:
+            target = run["config"]["epsilon"]
+            _, worst, _, _ = check_run(run, sizes)
+            if worst is None:
+                continue
+            key = str(target)
+            worst_by_eps[key] = max(worst_by_eps.get(key, 0.0), worst)
+        args.json_out.write_text(json.dumps(worst_by_eps, indent=2, sort_keys=True))
+        print(f"wrote worst spent epsilon per condition to {args.json_out}")
 
     print()
     if breaches:

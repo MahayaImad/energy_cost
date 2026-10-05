@@ -133,12 +133,19 @@ identical guarantee.
 ### 4b. Regenerate the paper's tables
 
 ```bash
+python check_realised_epsilon.py results_har/ --json spent.json
 python analyze.py results_har/ --latex --targets 0.40,0.50,0.70 \
-                  --sigma-from results/          # brackets the CIFAR sigma
+                  --sigma-from results/ --realised-eps spent.json
+python per_seed_peak.py results_har/            # per-seed peak and final acc
 ```
 
 Prints Tables I, II and III as LaTeX, plus the sentence values for the
-per-round and carbon subsections as comments. Paste the blocks whole; do not
+per-round and carbon subsections as comments: both noise floors (energy and
+final accuracy), the private/non-private power and round-duration ratios
+whose product is the per-round energy ratio, and whether the overhead is
+ordered in epsilon or merely scattered above the floor -- a monotone rise is
+a budget effect, non-monotone scatter is a measurement limit, and the two
+call for different wording. Paste the blocks whole; do not
 retype a cell. Every column, including the overhead percentages, is computed
 from the JSONs — a figure retyped from a rounded table cell no longer matches
 the data it came from, and then nobody can say which pass produced it.
@@ -230,6 +237,7 @@ analysis.
 | `prepare_har.py` | UCI-HAR archive -> a validated `.npz` |
 | `prewarm_sigma.py` | derives every sigma *before* measurement starts |
 | `verify_dp.py` | Phase-0 checks on the privacy accounting |
+| `per_seed_peak.py` | per-seed peak and final accuracy, one row per seed |
 | `check_realised_epsilon.py` | recomputes each client's SPENT epsilon from the logs |
 | `analyze.py` | the gate, the tables, the figures |
 

@@ -188,6 +188,27 @@ def noise_floor(by_eps):
     return worst_w, worst_pct
 
 
+def accuracy_floor(by_eps):
+    """Worst within-condition across-seed SD of FINAL accuracy.
+
+    The energy floor says what energy difference is resolvable. It says
+    nothing about accuracy, so an accuracy gap smaller than this one is not
+    an effect either -- which is what the ablations turn on.
+    """
+    worst_abs, worst_pct = 0.0, 0.0
+    for group in by_eps.values():
+        if len(group) < 2:
+            continue
+        finals = np.array([r["rounds"][-1].get("central_acc", np.nan)
+                           for r in group], float)
+        if np.isnan(finals).any() or finals.mean() == 0:
+            continue
+        sd = float(finals.std(ddof=1))
+        worst_abs = max(worst_abs, sd)
+        worst_pct = max(worst_pct, 100 * sd / float(finals.mean()))
+    return worst_abs, worst_pct
+
+
 def spearman(xs, ys):
     """Rank correlation, ties averaged. 0.0 when undefined. (No scipy.)"""
     if len(xs) < 3:
@@ -515,7 +536,7 @@ def tables(by_eps, targets):
 # --------------------------------------------------------------------- figures
 
 
-def figures(by_eps, out: Path):
+def figures(by_eps, out: Path, peak_markers=True):
     """The three figures the paper uses. Written into `out`."""
     import matplotlib
     matplotlib.use("Agg")
@@ -531,9 +552,10 @@ def figures(by_eps, out: Path):
         x = np.arange(1, acc.shape[1] + 1)
         ax.plot(x, mean, label=eps_label(eps))
         ax.fill_between(x, mean - sd, mean + sd, alpha=0.18)
-        pr, peak, final = peak_round(group)
-        if pr and final < peak - 0.005:
-            ax.plot([pr], [peak], "v", color="k", ms=5)
+        if peak_markers:
+            pr, peak, final = peak_round(group)
+            if pr and final < peak - 0.005:
+                ax.plot([pr], [peak], "v", color="k", ms=5)
     ax.set_xlabel("Communication round")
     ax.set_ylabel("Central test accuracy")
     ax.set_title("Convergence under a fixed privacy budget")
@@ -608,9 +630,20 @@ def ablations(runs, targets):
     target = targets[len(targets) // 2]
     print(f"    'lost' is accuracy given back between the peak and round "
           f"{n_rounds}; 'wasted J' is the energy spent getting there.")
-    print("\n    (* = single seed. Below the noise floor nothing under roughly")
-    print("     10% is resolvable; re-run an axis with three seeds before")
-    print('     quoting it: SEEDS="0 1 2" AXES=epochs ./run_ablations.sh)')
+    print("    J/round and wasted J are NET of idle, matching the paper's tables.")
+    # The floors are measured here rather than quoted from memory: the
+    # ablations turn entirely on whether a difference clears them, and the
+    # accuracy floor is the one the tuning conclusion rests on.
+    by_eps = defaultdict(list)
+    for r in runs:
+        by_eps[str(r["config"]["epsilon"])].append(r)
+    _, energy_pct = noise_floor(by_eps)
+    acc_abs, acc_pct = accuracy_floor(by_eps)
+    print(f"\n    Floors measured on these runs: energy {energy_pct:.2f}%, "
+          f"final accuracy +/-{acc_abs:.4f} ({acc_pct:.2f}%).")
+    print("    A difference below either is not an effect.")
+    print("    (* = single seed, where no floor applies at all; re-run that")
+    print('     axis with three seeds: SEEDS="0 1 2" AXES=epochs ./run_ablations.sh)')
 
     for field, label in ABLATION_FACTORS.items():
         varied = sorted({r["config"].get(field) for r in runs
@@ -633,7 +666,8 @@ def ablations(runs, targets):
                               key=eps_key):
                 group = [r for r in selected
                          if str(r["config"]["epsilon"]) == eps]
-                jr = np.mean([total_energy(r) / len(r["rounds"]) for r in group])
+                jr = np.mean([total_energy(r, True) / len(r["rounds"])
+                              for r in group])
                 j_target, _, n_hit = energy_to_target(group, target, net=True)
                 pr, peak, final = peak_round(group)
                 rounds = min(len(r["rounds"]) for r in group)
@@ -702,7 +736,19 @@ def _kwh_scaled(group):
     return float(np.mean([total_energy(r) for r in group])) / 3.6e6 * CARBON_RUNS
 
 
-def latex_tables(by_eps, targets, sigma_from=None):
+def _gross_w(group):
+    return float(np.mean([total_energy(r) / measured_wall(r) for r in group]))
+
+
+def _net_w(group):
+    return float(np.mean([total_energy(r, True) / measured_wall(r) for r in group]))
+
+
+def _wall_per_round(group):
+    return float(np.mean([measured_wall(r) / len(r["rounds"]) for r in group]))
+
+
+def latex_tables(by_eps, targets, sigma_from=None, realised_eps=None):
     """Emit the paper's tables, every number computed here.
 
     Exists because a hand-computed column is how a figure with no provenance
@@ -731,10 +777,21 @@ def latex_tables(by_eps, targets, sigma_from=None):
             if not np.isnan(lo).all():
                 brackets[eps] = (float(np.nanmin(lo)), float(np.nanmax(hi)))
 
+    # Worst realised epsilon per condition, if check_realised_epsilon.py was
+    # run with --json. Left blank rather than guessed when it was not: the
+    # realised budget needs the RDP accountant, which this script does not
+    # import.
+    realised = {}
+    if realised_eps:
+        realised = {str(k): float(v)
+                    for k, v in json.loads(Path(realised_eps).read_text()).items()}
+
     print("% ---- Table: per-round energy. Generated by analyze.py --latex ----")
-    print("\\begin{tabular}{lrrl}")
+    print("% Every cell computed from the run JSONs. Paste whole; retype nothing.")
+    print("\\begin{tabular}{lrrrrrl}")
     print("\\hline")
-    print("$\\varepsilon$ & Net (J) & Overhead & $\\sigma$ range \\\\")
+    print("$\\varepsilon$ & Gross (W) & Net (W) & Net (J/rd) & Overhead & "
+          "Worst $\\varepsilon$ & $\\sigma$ range \\\\")
     print("\\hline")
     overheads = []
     for eps, group in private.items():
@@ -747,10 +804,18 @@ def latex_tables(by_eps, targets, sigma_from=None):
                  else f"{np.nanmin(lo):.2f}--{np.nanmax(hi):.2f}")
         if eps in brackets:
             sigma += f" \\; [{brackets[eps][0]:.2f}--{brackets[eps][1]:.2f}]"
-        print(f"{eps:<8} & {jr:.1f} & ${over:+.1f}\\%$ & {sigma} \\\\")
-    print(f"$\\infty$ & {baseline:.1f} & ---       & --- \\\\")
+        spent = f"{realised[eps]:.3f}" if eps in realised else "--"
+        print(f"{eps:<8} & {_gross_w(group):.2f} & {_net_w(group):.2f} & "
+              f"{jr:.1f} & ${over:+.1f}\\%$ & {spent} & {sigma} \\\\")
+    b = base[0]
+    print(f"$\\infty$ & {_gross_w(b):.2f} & {_net_w(b):.2f} & {baseline:.1f} & "
+          f"---       & ---   & --- \\\\")
     print("\\hline")
     print("\\end{tabular}")
+    if realised_eps is None:
+        print("% NOTE: the 'Worst epsilon' column is empty. Fill it with")
+        print("%   python check_realised_epsilon.py <dir> --json spent.json")
+        print("%   python analyze.py <dir> --latex --realised-eps spent.json")
 
     jr_private = [_net_per_round(g) for g in private.values()]
     spread_pct = 100 * (max(jr_private) - min(jr_private)) / float(np.mean(jr_private))
@@ -762,6 +827,29 @@ def latex_tables(by_eps, targets, sigma_from=None):
           f"range {min(overheads):+.1f}% to {max(overheads):+.1f}%")
     print(f"%   spread across private conditions: {spread_pct:.1f}% of the mean")
     print(f"%   noise floor: {floor_pct:.2f}%")
+    # Does the overhead rise with epsilon, or just scatter? A monotone rise
+    # would be a real epsilon effect; non-monotone scatter above the floor is
+    # a measurement limit, and the two call for different wording.
+    order = [100 * (_net_per_round(private[e]) - baseline) / baseline
+             for e in sorted(private, key=eps_key)]
+    if all(a < b for a, b in zip(order, order[1:])):
+        trend = "rises monotonically with epsilon -- a real epsilon effect"
+    elif all(a > b for a, b in zip(order, order[1:])):
+        trend = "falls monotonically with epsilon -- a real epsilon effect"
+    else:
+        trend = ("is NOT ordered in epsilon (non-monotone scatter), so the "
+                 "spread is a measurement limit, not a budget effect")
+    ratio_power = float(np.mean([_net_w(g) for g in private.values()])) / _net_w(base[0])
+    ratio_wall = (float(np.mean([_wall_per_round(g) for g in private.values()]))
+                  / _wall_per_round(base[0]))
+    acc_abs, acc_pct = accuracy_floor(by_eps)
+    print(f"%   private/non-private net power ratio:  {ratio_power:.3f}x")
+    print(f"%   private/non-private round duration:   {ratio_wall:.3f}x")
+    print(f"%   (their product is the per-round energy ratio: "
+          f"{ratio_power * ratio_wall:.3f}x)")
+    print(f"%   overhead across budgets {trend}")
+    print(f"%   accuracy noise floor: +/-{acc_abs:.4f} absolute "
+          f"({acc_pct:.2f}% of mean final accuracy)")
     verdict = ("inside" if spread_pct <= floor_pct else "OUTSIDE")
     print(f"%   -> the spread is {verdict} the floor"
           + ("" if spread_pct <= floor_pct
@@ -824,6 +912,12 @@ def main():
                     help="configuration and measurement numbers for the write-up")
     ap.add_argument("--latex", action="store_true",
                     help="print the paper's tables, no column computed by hand")
+    ap.add_argument("--realised-eps", default=None,
+                    help="with --latex: JSON from check_realised_epsilon.py "
+                         "--json, to fill the worst-spent-epsilon column")
+    ap.add_argument("--no-peak-markers", action="store_true",
+                    help="draw Fig. 1 without the energy-optimal stopping "
+                         "markers")
     ap.add_argument("--sigma-from", default=None,
                     help="with --latex: a second results dir whose sigma ranges "
                          "go in brackets in the per-round table")
@@ -838,7 +932,8 @@ def main():
     print(f"dataset: {dataset}   targets: {targets}\n")
 
     if args.latex:
-        latex_tables(by_eps, targets, args.sigma_from)
+        latex_tables(by_eps, targets, args.sigma_from,
+                     args.realised_eps)
     elif args.paper:
         paper(runs, by_eps)
     elif args.ablation:
@@ -851,7 +946,7 @@ def main():
     else:
         check(by_eps, runs)
         tables(by_eps, targets)
-        figures(by_eps, args.results)
+        figures(by_eps, args.results, not args.no_peak_markers)
 
 
 if __name__ == "__main__":
