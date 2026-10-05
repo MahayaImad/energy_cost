@@ -130,6 +130,24 @@ attributable to privacy is **105–133 gCO2eq on Algeria's grid against
 5.6–7.1 g in Norway — a factor of 18.8** for identical computation under an
 identical guarantee.
 
+### 4b. Regenerate the paper's tables
+
+```bash
+python analyze.py results_har/ --latex --targets 0.40,0.50,0.70 \
+                  --sigma-from results/          # brackets the CIFAR sigma
+```
+
+Prints Tables I, II and III as LaTeX, plus the sentence values for the
+per-round and carbon subsections as comments. Paste the blocks whole; do not
+retype a cell. Every column, including the overhead percentages, is computed
+from the JSONs — a figure retyped from a rounded table cell no longer matches
+the data it came from, and then nobody can say which pass produced it.
+
+The overhead column is computed from unrounded energies, so dividing the
+*displayed* one-decimal cells by hand can disagree in the last digit (20.3 /
+14.5 reads as +40.0 % where the table says +40.1 %). That is the table being
+right, not wrong.
+
 ### 5. Phase 2 — ablations
 
 ```bash
