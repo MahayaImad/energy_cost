@@ -79,6 +79,27 @@ then runs, then runs the gate. The gate output on the committed data:
 a real epsilon effect from the sweep simply drifting, and the near-zero
 confound (−0.196) is what randomising the run order buys.
 
+### 3b. Audit the privacy claim against what actually ran
+
+```bash
+python check_realised_epsilon.py results_har/
+```
+
+Sigma is calibrated against the *expected* number of rounds a client joins,
+`num_rounds * fraction_train`. The realised number is a binomial draw around
+it — at 100 rounds and fraction 0.5 the expectation is 50 with a standard
+deviation of 5 — so a client sampled 60 times takes 20 % more steps than the
+accountant was paid for, and its spent epsilon exceeds the reported one.
+"Reported epsilon is an upper bound" rests on claiming no subsampling
+amplification; it does not cover over-participation. This checks it.
+
+Participation comes from `sampled_partitions`, logged every round. Per-client
+`n` and sigma are rebuilt deterministically and then *proven* against the
+logs: every round's reconstructed partition sizes must sum to the recorded
+`examples_sum`, and the reconstructed sigmas' min and max must equal the
+recorded `sigma_min` and `sigma_max`. A mismatch aborts rather than reporting
+an epsilon about a run that did not happen.
+
 ### 4. Analysis — the published numbers
 
 ```bash
@@ -191,6 +212,7 @@ analysis.
 | `prepare_har.py` | UCI-HAR archive -> a validated `.npz` |
 | `prewarm_sigma.py` | derives every sigma *before* measurement starts |
 | `verify_dp.py` | Phase-0 checks on the privacy accounting |
+| `check_realised_epsilon.py` | recomputes each client's SPENT epsilon from the logs |
 | `analyze.py` | the gate, the tables, the figures |
 
 ## One thing worth knowing
