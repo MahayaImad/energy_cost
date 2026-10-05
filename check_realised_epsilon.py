@@ -31,17 +31,30 @@ from collections import Counter
 from pathlib import Path
 
 
+_sizes_cache: dict = {}
+
+
 def partition_sizes(dataset: str, num_partitions: int, alpha: float, seed: int):
-    """Local train-set size per client, exactly as the ClientApp saw it."""
+    """Local train-set size per client, exactly as the ClientApp saw it.
+
+    Keyed on the seed, because it matters: the HAR partition is by study
+    participant and so is seed-independent, but CIFAR-10's Dirichlet
+    partition is redrawn per seed, giving each run of the sweep DIFFERENT
+    client sizes. Computing one set of sizes and applying it to every run
+    would audit a federation that never existed.
+    """
     from energyfl.task import is_har, load_partition
 
     if is_har(dataset):
-        seed = 0          # the subject partition is seed-independent
-    return [
-        len(load_partition(pid, num_partitions, 32, alpha, seed,
-                           dataset=dataset)[0].dataset)
-        for pid in range(num_partitions)
-    ]
+        seed = 0
+    key = (str(dataset).lower(), int(num_partitions), float(alpha), int(seed))
+    if key not in _sizes_cache:
+        _sizes_cache[key] = [
+            len(load_partition(pid, num_partitions, 32, alpha, seed,
+                               dataset=dataset)[0].dataset)
+            for pid in range(num_partitions)
+        ]
+    return _sizes_cache[key]
 
 
 def spent_epsilon(sigma: float, n: int, batch_size: int, steps: int,
@@ -143,11 +156,20 @@ def main():
         sys.exit(f"no run_*.json found in {args.results}")
     runs = [json.loads(p.read_text()) for p in paths]
 
+    def sizes_for(cfg):
+        return partition_sizes(cfg["dataset"], cfg["num_supernodes"],
+                               cfg["dirichlet_alpha"], cfg["seed"])
+
     one = runs[0]["config"]
-    sizes = partition_sizes(one["dataset"], one["num_supernodes"],
-                            one["dirichlet_alpha"], one["seed"])
-    print(f"dataset {one['dataset']}, {one['num_supernodes']} clients, "
-          f"n = {min(sizes)}..{max(sizes)}\n")
+    spans = {}
+    for run in runs:
+        sz = sizes_for(run["config"])
+        spans[run["config"]["seed"]] = (min(sz), max(sz))
+    print(f"dataset {one['dataset']}, {one['num_supernodes']} clients")
+    for seed in sorted(spans):
+        lo, hi = spans[seed]
+        print(f"  seed {seed}: n = {lo}..{hi}")
+    print()
 
     print("Participation: how many rounds each client was actually sampled in,")
     print("against the expectation the accountant was calibrated for.\n")
@@ -155,6 +177,7 @@ def main():
     breaches = []
     for run, path in zip(runs, paths):
         cfg = run["config"]
+        sizes = sizes_for(cfg)
         target, worst, pid, joined = check_run(run, sizes, args.verbose)
         expected = cfg["num_rounds"] * cfg["fraction_train"]
         counts = sorted(joined.values())
@@ -174,7 +197,7 @@ def main():
         worst_by_eps = {}
         for run in runs:
             target = run["config"]["epsilon"]
-            _, worst, _, _ = check_run(run, sizes)
+            _, worst, _, _ = check_run(run, sizes_for(run["config"]))
             if worst is None:
                 continue
             key = str(target)
