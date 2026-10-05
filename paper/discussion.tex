@@ -1,79 +1,83 @@
-% Section V -- Discussion. Every number appears in Section IV.
+% Section V -- Discussion (second cut, for the six-page limit). Every number
+% appears in Section IV. Nothing here restates a number the conclusion needs.
 
 \section{Discussion}
 
 \subsection{Two Costs, Two Remedies}
 
-The per-round overhead is an implementation cost, and the decomposition says
-which part. The power factor is the same on both datasets, so it is the
-arithmetic of per-sample gradients and clipping and will yield only to better
-kernels or amortised clipping; the time factor is not, so it is where a
-scheduling or batching change could act. Neither varies systematically with
-the budget, and everything that does acts through the round count, bounded by
-the privacy accounting rather than by any implementation. An evaluation
-reporting energy per round sees only the first and concludes that privacy
-costs a third to a half again; measured against the accuracy a deployment
-needs, the second is several times larger and sometimes infinite. The third
-axis therefore does not merely rank configurations, it changes which
-engineering effort is worth spending.
+The fixed per-round overhead is an implementation cost --- per-sample
+gradients and clipping --- and is what a systems contribution can attack,
+through better kernels or amortised clipping. The convergence penalty is
+bounded by the privacy accounting rather than by any implementation, and can
+only be answered through the round budget. An evaluation reporting energy per
+round sees only the first and concludes that privacy costs a flat half again;
+measured against the accuracy a deployment needs, the second is several times
+larger. The third axis therefore does not merely rank configurations, it
+changes which engineering effort is worth spending.
 
 \subsection{Privacy Sets a Quality Ceiling}
 
-The cost of privacy is not a constant multiplier: on HAR it is invisible at
-$0.40$ accuracy, $5.7\times$ at $0.70$, and unbounded at $0.85$. Past the
+The cost of privacy is not a constant multiplier: it is invisible at $0.40$
+accuracy on HAR, $5.7\times$ at $0.70$, and unbounded at $0.85$. Past the
 ceiling a budget implies, the trade is not energy for accuracy but nothing for
 nothing. The usual formulation --- choose $\varepsilon$, then see what utility
 follows --- treats the two as sequential; our results suggest choosing them
-jointly, since a utility-only evaluation reports a lower number without saying
-whether more computation would fix it. It would not: the round budget is part
-of the privacy budget, so training to convergence is self-defeating, the
-extension being what prevents convergence.
+jointly, since a utility-only evaluation reports a lower number without
+indicating whether more computation would fix it.
 
-\subsection{When Tuning Works Is Itself a Finding}
+The mechanism is that the round budget is part of the privacy budget. Every
+round a client participates in consumes budget, so $\sigma$ is fixed before
+training by a decision federated learning usually treats as free: over the
+100 rounds HAR needs, $\sigma$ at $\varepsilon = 0.5$ reaches $17.5$--$20.6$.
+Training to convergence is self-defeating, because the extension is what
+prevents convergence. A stopping rule follows, and we state it conditionally:
+it is resolvable on CIFAR-10 below $\varepsilon = 2$ and on HAR nowhere, so
+what generalises is the direction, not a round number.
 
-The same two-knob experiment is inert on HAR and decisive on CIFAR-10, and
-that contrast is more useful than either result alone: whether hyperparameter
-search is worth its energy under DP depends on whether the private model still
-retains signal to lose. Where it does not, the levers that remain are the
-privacy and round budgets. And increasing local work per round --- the
-standard way to buy fewer rounds --- stops paying on HAR and actively harms on
-CIFAR-10, because local steps enter $s_{\text{total}}$ and force a larger
-$\sigma$.
+\subsection{When the Model Is Noise-Limited, Tuning Is Not the Lever}
+
+Our HAR ablations are negative and useful. At $\varepsilon = 1$ final accuracy
+spans $0.037$ across local epochs and $0.018$ across the clipping norm, both
+inside the $\pm 0.041$ floor, so a practitioner responding to a disappointing
+private model by sweeping hyperparameters will spend considerable energy to
+land where they started. This does not hold in every regime, and CIFAR-10
+shows why: there the same two knobs move accuracy by three to five times its
+floor, because the private model still retains signal to lose. Increasing local work per round is the standard way to reduce
+communication in federated learning; under DP it stops paying on HAR and
+actively harms on CIFAR-10, because local steps enter the budget and force a
+larger $\sigma$.
 
 \subsection{Where the Computation Runs}
 
 Measured in joules, the cost inherits the carbon intensity of wherever they
 are drawn: an $18.8\times$ range between Algeria's grid and Norway's for
-identical computation and an identical guarantee. The premium came out the
-same on both datasets despite a fivefold difference in energy per round, so
-the ratio belongs to the privacy mechanism rather than the workload. The point
-is sharper for federated learning than for centralised training, because the
-computation sits on whatever grids the participating devices do and no
-operator chooses them.
+identical computation and an identical guarantee. The point is sharper for
+federated learning than for centralised training, because the computation
+sits on whatever grids the participating devices do and no operator chooses
+them. A deployment cannot relocate the way a data centre can; what it can
+adjust is how much computation the privacy requirement demands.
 
-\subsection{Two Ways to Measure a Privacy Mechanism Wrongly}
+\subsection{Measuring Energy Around a Privacy Accountant}
 
 Instrumentation attached to a privacy mechanism tends to scale with the
-privacy parameter, so its cost mimics the effect under study: the accountant's
-calibration search, run inside the federated loop, reproduced our entire
-observed $\varepsilon$ trend while step counts stayed flat, and nothing in the
-resulting numbers announces it. The second hazard is an accounting error
-rather than a measurement one, and it survived into our own first draft.
-Both are generic to client-level DP in simulation, so we recommend four
-controls: derive noise multipliers before measurement begins, verify per round
-that executed and calibrated step counts agree, randomise run order, and
-recompute each client's spent budget from logged participation rather than
-reporting the target.
+privacy parameter, so its cost mimics the effect under study. The accountant's
+noise-calibration search is the case we hit: run inside the federated loop it
+reproduced our entire observed $\varepsilon$ trend while executed step counts
+stayed flat, and nothing in the resulting numbers announces this. We recommend
+three controls: derive noise multipliers before measurement begins, verify per
+round that executed and calibrated step counts agree, and randomise run order
+so that drift over a sweep cannot be mistaken for an $\varepsilon$ effect.
 
 \subsection{Threats to Validity}
+\label{sec:threats}
 
 Clients are virtual and share one GPU, so the ratios transfer to real devices
 but the absolute joules do not; confirming them on physical hardware is the
 immediate next step. Measurement is GPU-only and communication energy is
 modelled --- for a $0.15$--$0.24$~MB model over tens of rounds we expect it
 small, but have not shown it. One CIFAR-10 run is excluded for being measured
-in a different session, leaving that condition on two seeds. And our two
-datasets bound the effects rather than establishing them: the stopping round
-appears on one and not the other, and the tuning result inverts between them,
-so where the boundary falls is a question this work poses rather than
-settles.
+in a different session, leaving that condition on two seeds. And the budgets
+we report are the targets, not the worst realised ones
+(Section~\ref{sec:spent}): the costs here are those of the \emph{stated}
+guarantee under the weakest trust assumptions, and the guarantee actually
+delivered is the weaker one in Table~\ref{tab:perround}.

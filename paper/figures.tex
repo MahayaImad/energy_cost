@@ -1,33 +1,22 @@
-% Figures. Regenerate with:
-%   python analyze.py results_har/ --no-peak-markers   (HAR, no stopping marks)
-%   python analyze.py results/                          (CIFAR-10, with marks)
-% then copy each fig1_convergence.png under the names below. The carbon figure
-% is dropped: Table III carries the same four grids and the same values.
-% Inputted before Section IV in main.tex: LaTeX floats move forward only.
+% Figure environments. All three are the UCI-HAR sweep, to match Section IV.
+% Regenerate with `python analyze.py results_har/`, which writes the PNGs into
+% results_har/; copy them beside main.tex (graphicspath is ./ only, on purpose
+% -- results/ holds identically named CIFAR-10 figures).
+% Inputted before Section IV in main.tex: floats only move forward.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\columnwidth]{fig_har_convergence.png}
+\includegraphics[width=\columnwidth]{fig1_convergence.png}
 \caption{Central test accuracy against communication round on UCI-HAR over
-100 rounds, means of three seeds with $\pm 1$ SD bands. No stopping marks are
+100 rounds, means of three seeds with $\pm 1$ SD bands. No stopping marker is
 drawn because none is resolvable here: the largest peak-to-final drop is
-$0.032$ at $\varepsilon = 1$ against a $\pm 0.042$ across-seed spread. What
-the figure does show is the quality ceiling --- the non-private model reaches
-$0.88$ while $\varepsilon = 0.5$ plateaus near $0.47$, and no amount of
-further training closes that gap, because the training itself spends budget.}
+$0.032$ at $\varepsilon = 1$ against a $\pm 0.042$ across-seed spread. What the
+figure shows instead is the quality ceiling --- the non-private model reaches
+$0.88$ while $\varepsilon = 0.5$ plateaus near $0.47$, and further training
+cannot close that gap because the training itself spends budget.}
 \label{fig:convergence}
 \end{figure}
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{fig_cifar_stopping.png}
-\caption{The same curves on CIFAR-10 over 30 rounds, where a stopping round is
-resolvable under a tight budget. Markers show the energy-optimal stopping
-round, drawn only where the peak-to-final drop exceeds the across-seed spread
-of final accuracy: at $\varepsilon = 0.5$ (round 8, all three seeds peaking
-within one round of each other) and $\varepsilon = 1$ (rounds 10--16). At
-$\varepsilon \ge 2$ and without privacy no decline clears the spread, so no
-marker is drawn. The rounds after the $\varepsilon = 0.5$ peak account for
-$60$--$68\%$ of the run's net energy and buy negative accuracy.}
-\label{fig:stopping}
-\end{figure}
+% fig2 (energy to target) dropped: Table~\ref{tab:target} carries the same
+% numbers with the unreached cells legible, which a bar chart cannot show.
+
