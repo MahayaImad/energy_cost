@@ -56,19 +56,39 @@ def report(target, runs):
     mean = [sum(c[i] for c in curves) / len(curves) for i in range(n)]
     peak = max(mean)
     pr = mean.index(peak) + 1
+    drop = peak - mean[-1]
     print(f"\n  mean curve: peak {peak:.4f} at round {pr}, final {mean[-1]:.4f}, "
-          f"drop {peak - mean[-1]:+.4f}")
+          f"drop {drop:+.4f}")
 
-    cutoff = int(n * 0.9)
-    early = sum(1 for c in curves if c.index(max(c)) + 1 < cutoff)
-    print(f"  {early}/{len(curves)} seeds peak before round {cutoff}")
-    if early == len(curves):
-        print("  -> every seed peaks early; the mean curve is representative.")
-    elif early == 0:
-        print("  -> no seed peaks early; there is no stopping round here.")
+    # The across-seed spread of FINAL accuracy is this condition's accuracy
+    # resolution. A peak-to-final drop below it is not a decline, and an
+    # argmax read off a plateau that noisy is not a stopping round.
+    finals = [c[-1] for c in curves]
+    m = sum(finals) / len(finals)
+    sd = (sum((x - m) ** 2 for x in finals) / (len(finals) - 1)) ** 0.5
+    print(f"  across-seed SD of final accuracy: +/-{sd:.4f}")
+
+    peaks = sorted(c.index(max(c)) + 1 for c in curves)
+    print(f"  per-seed peak rounds: {peaks}")
+
+    if drop <= sd:
+        print(f"  -> NO RESOLVABLE STOPPING ROUND: the drop ({drop:+.4f}) is")
+        print(f"     within the across-seed spread (+/-{sd:.4f}). Reporting a")
+        print("     peak round here would be reading an argmax off noise.")
+        return
+    if not (peaks[0] <= pr <= peaks[-1]):
+        print(f"  -> the mean peaks at round {pr}, OUTSIDE the per-seed range")
+        print(f"     {peaks[0]}..{peaks[-1]}. Averaging noisy plateaus moved the")
+        print("     argmax; do not quote the mean's peak round.")
+        return
+    spread = peaks[-1] - peaks[0]
+    if spread > 0.3 * n:
+        print("  -> the drop clears the spread, but the per-seed peak rounds")
+        print(f"     scatter over {spread} rounds of {n}. Quote the range, not")
+        print("     a single round.")
     else:
-        print(f"  -> the mean is driven by {early} of {len(curves)} seeds. "
-              "Report per seed, or say so.")
+        print("  -> the drop clears the across-seed spread and the seeds agree")
+        print("     on when it happens. The stopping round is real here.")
 
 
 def main():
