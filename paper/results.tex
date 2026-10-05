@@ -1,67 +1,151 @@
-% Section IV -- Results (condensed). HAR primary, CIFAR-10 secondary.
-% PROVENANCE
-%   HAR:      `python analyze.py results_har/` (+ --targets 0.40,0.50,0.85)
-%             and `--ablation` on results_ablation_har/, 18-run sweep, 100 rounds.
-%   CIFAR-10: same commands on results/ and results_ablation/, 30 rounds.
-% Regenerate and update rather than editing values by hand.
+% Section IV -- Results.
+% PROVENANCE. Every number below is printed by analyze.py from the run JSONs
+% committed in this repository. Regenerate, do not retype:
+%   HAR     : analyze.py results_har/ --latex --targets 0.40,0.50,0.70,0.85
+%             --sigma-from results/ --realised-eps spent_har.json
+%   CIFAR-10: analyze.py results/ --latex --targets 0.15,0.20,0.25
+%             --realised-eps spent_cifar.json
+%   ablations: analyze.py results_ablation_har/ --ablation ; same on results_ablation/
+%   stopping : per_seed_peak.py results_har/ ; per_seed_peak.py results/
 
 \section{Results}
 
-All figures are means over three seeds, against noise floors of $9.46\%$ on
-HAR and $6.38\%$ on CIFAR-10; no smaller difference is treated as resolvable.
+Every figure is a mean over three seeds. Two resolutions bound what we claim:
+the energy floor, the worst within-condition across-seed spread of board
+power, is $\pm 4.89$~W ($7.80\%$) on HAR and $\pm 5.94$~W ($8.91\%$) on
+CIFAR-10; the accuracy floor, the same statistic on final accuracy, is
+$\pm 0.051$ on HAR and $\pm 0.031$ on CIFAR-10. No smaller difference is
+reported as an effect.
 
-\subsection{The Per-Round Cost Is Fixed}
+The HAR sweep passes every gate: $18/18$ runs, wall-clock flat to $0.3\%$
+across the private conditions against $38.0$~s without privacy, and 89
+optimiser steps per round throughout. On CIFAR-10 one $\varepsilon = 4$ run
+was measured a month after the others and is excluded for breaking the
+flatness gate; including it moves the mean overhead from $+34\%$ to $+36\%$,
+inside the floor either way, so that condition is reported on two seeds.
 
-Net of idle, private training on HAR costs $21.0$~J per round against
-$14.5$~J without privacy, an overhead of $+45\%$
-(Table~\ref{tab:perround}). Across the five private conditions the figure
-varies by $8.2\%$ of its mean, inside the noise floor, so the per-round cost
-does not depend on $\varepsilon$ (Fig.~\ref{fig:perround}). CIFAR-10 agrees at $+60\%$ with a $9.6\%$
-spread. Wall-clock agrees: every private condition takes $47.8$--$48.3$~s for 100
-rounds against $37.2$~s without privacy, a $1.2\%$ spread against an $11$~s
-step, with all six executing 89 optimiser steps per round.
+\subsection{The Per-Round Cost Is Power Times Time}
 
-The two mechanisms are therefore separable. The per-round overhead is an
-implementation cost --- per-sample gradients and clipping --- paid identically
-at any budget. Everything $\varepsilon$-dependent acts through the number of
-rounds needed. Reporting only energy per round would show privacy costing a
-flat $45\%$ and miss the larger effect.
+Net of idle, private training costs $21.1$~J per round on HAR against
+$14.0$~J, and $107.9$~J against $80.4$~J on CIFAR-10 --- $+51\%$ and $+34\%$
+(Table~\ref{tab:perround}). Two numbers that far apart look like an unstable
+measurement until they are decomposed. Private rounds draw more power
+\emph{and} last longer, and the two factors behave differently:
 
-\begin{table}[t]
-\caption{Energy per round on UCI-HAR (100 rounds) and the per-client noise
-multiplier, means over three seeds. CIFAR-10 $\sigma$ at 30 rounds in
-brackets}
-\label{tab:perround}
-\centering
-\begin{tabular}{lrrl}
+\begin{center}
+\begin{tabular}{lrrr}
 \hline
-$\varepsilon$ & Net (J) & Overhead & $\sigma$ range \\
+ & Power & Duration & Energy \\
 \hline
-0.5      & 21.1 & $+45.6\%$ & 17.50--20.63 \; [2.77--6.09] \\
-1        & 20.3 & $+40.1\%$ &  9.22--10.94 \; [1.59--3.32] \\
-2        & 20.5 & $+41.9\%$ &  4.94--5.90 \; [1.04--1.90] \\
-4        & 22.0 & $+52.0\%$ &  2.75--3.25 \; [0.78--1.20] \\
-8        & 21.0 & $+45.1\%$ &  1.64--1.90 \; [0.62--0.85] \\
-$\infty$ & 14.5 & ---       & --- \\
+UCI-HAR  & $1.190\times$ & $1.267\times$ & $1.507\times$ \\
+CIFAR-10 & $1.196\times$ & $1.132\times$ & $1.354\times$ \\
 \hline
 \end{tabular}
-\end{table}
+\end{center}
 
-\subsection{The Cost Grows with the Target}
+The power factor is the same to within $0.5\%$ across two datasets with
+different models, different input shapes and a $4\times$ difference in model
+size: the arithmetic of per-sample gradients and clipping, apparently a
+hardware constant. The time factor is not, depending on how the workload fills
+the device.
 
-Energy per round makes privacy look like a flat surcharge. Measured against
-what a deployment wants --- a model of a given quality --- it is not flat at
-all (Table~\ref{tab:target}). At $0.40$ accuracy every condition costs
-$178$--$218$~J net, all within the noise floor: privacy is free at this
-quality. At $0.50$ the private conditions cost $1.17$--$2.10\times$ the
-non-private $204$~J. At $0.70$ the survivors cost $\mathbf{5.8\times}$
-($1753$~J at $\varepsilon = 4$ against $300$~J), and $\varepsilon \le 2$ never
-arrive. At $0.85$, which the non-private model reaches in $57.7$ rounds and
-$878$~J, no budget we tested arrives at any expenditure.
+Neither orders with $\varepsilon$. The overhead runs $+45.4\%$, $+43.4\%$,
+$+48.3\%$, $+62.2\%$, $+54.0\%$ on HAR and $+36.0\%$, $+38.6\%$, $+30.7\%$,
+$+30.6\%$, $+35.6\%$ on CIFAR-10, non-monotone in both. On CIFAR-10 the spread
+across budgets is $6.0\%$ of the mean, inside the $8.91\%$ floor, so the
+per-round cost is $\varepsilon$-independent within resolution; on HAR it is
+$12.5\%$ against $7.80\%$, not resolvably flat, but being non-monotone it is
+scatter above our resolution rather than a budget effect. Either way the
+per-round cost carries no systematic budget dependence, which is what the rest
+of this section rests on.
+
+\subsection{The Cost Grows with the Accuracy Demanded}
+
+Measured against the quality a deployment wants, the cost is not flat at all
+(Table~\ref{tab:target}, Fig.~\ref{fig:convergence}). On HAR, reaching $0.40$
+accuracy costs $185$--$357$~J
+net whether or not privacy is on: at this quality privacy is free. At $0.50$
+the private conditions cost $1.28$--$1.79\times$ the non-private $197$~J. At
+$0.70$ only $\varepsilon \ge 4$ arrives at all, at $1710$~J against $301$~J, a
+factor of $\mathbf{5.7}$. At $0.85$, which the non-private model reaches in
+$57.0$ rounds and $839$~J, no budget we tested arrives at any expenditure.
+
+CIFAR-10 shows the same shape at its own scale: $0.15$ costs $644$--$760$~J
+against $611$~J, $0.20$ costs $1.40$--$1.63\times$ the non-private $677$~J,
+and $0.25$ is reached only at $\varepsilon \ge 2$, at $1.96$--$2.29\times$.
 
 Unreachability is the sharpest form of the cost: above a budget-dependent
-ceiling a deployment cannot buy the accuracy at all, because the training that
-would close the gap is what raises $\sigma$.
+ceiling the accuracy cannot be bought at all, because the extra training that
+would close the gap is itself what raises $\sigma$.
+
+\subsection{A Stopping Round Appears Only Under a Tight Budget}
+
+Under a tight enough budget the accuracy curve peaks and declines, so training
+past the peak spends energy and loses accuracy at once. Whether a peak is
+resolvable is a question about noise rather than about the argmax, so we mark
+a stopping round only where the peak-to-final drop exceeds the across-seed
+spread of final accuracy in that condition.
+
+Two CIFAR-10 budgets qualify (Fig.~\ref{fig:stopping}). At
+$\varepsilon = 0.5$ the mean curve peaks at $0.176$ at round 8 and ends at
+$0.150$ --- a drop of $0.026$ against a $\pm 0.010$ spread, the three seeds
+peaking at rounds 8, 8 and 9 --- and the rounds after the peak account for
+$60$--$68\%$ of the run's net energy. At $\varepsilon = 1$ the drop is $0.044$
+against $\pm 0.014$, the seeds peak between rounds 10 and 16, and
+$42$--$61\%$ of the energy falls after it. At $\varepsilon \ge 2$, and without
+privacy, no decline clears the spread within 30 rounds.
+
+UCI-HAR produces no resolvable stopping round at any budget: its largest drop
+is $0.032$ at $\varepsilon = 1$ against a $\pm 0.042$ spread, and at
+$\varepsilon = 0.5$ its seeds peak at rounds 16, 54 and 65 while the mean
+curve peaks at round 98 --- an argmax wandering over a plateau, not a decline.
+With $\sigma$ near $20$ the model never climbs far enough to have anything to
+give back. The effect is therefore real but conditional, with the threshold
+between $\varepsilon = 1$ and $\varepsilon = 2$ on CIFAR-10.
+
+\subsection{Under a Tight Budget, Tuning Stops Working --- On One Task}
+
+We vary one factor at a time at $\varepsilon \in \{1, \infty\}$ with three
+seeds per cell, reading every difference against floors measured within a
+cell: $\pm 0.041$ on accuracy for HAR, $\pm 0.024$ for CIFAR-10.
+
+\textbf{On HAR the private model is noise-limited.} At $\varepsilon = 1$ final
+accuracy spans $0.037$ across one, two and five local epochs and $0.018$
+across $C \in \{0.5, 1, 2\}$, both inside the floor and both non-monotone.
+\textbf{On CIFAR-10 the same two knobs are decisive}, falling monotonically
+from $0.182$ to $0.114$ to $0.100$ across the epoch axis ($3.4\times$ the
+floor) and from $0.213$ to $0.182$ to $0.100$ across the clipping axis
+($4.7\times$). The identical experiment is inert on one task and dominant on
+the other, and the floors say why: CIFAR-10 resolves accuracy twice as finely
+while its private model retains more signal to lose.
+
+\textbf{The standard efficiency lever stops paying.} More local work per round
+is how federated learning ordinarily buys fewer rounds, and without privacy it
+works: on HAR the energy to reach $0.70$ falls from $345$~J at one local epoch
+to $193$~J at five. Under $\varepsilon = 1$ the target is reached at no epoch
+count while energy per round rises from $22$~J to $49$~J, and on CIFAR-10 it
+is worse than useless --- accuracy collapses while post-peak waste grows from
+$1785$~J to $7312$~J. Local steps enter $s_{\text{total}}$, so extra local
+work forces a larger $\sigma$ and cancels the convergence gain it bought.
+
+\textbf{Clipping is free in compute.} $C$ leaves energy per round unchanged
+($22$~J at all three values on HAR, $112$--$119$~J on CIFAR-10), so it acts
+purely through convergence, in a way final accuracy alone hides: $C = 2$ peaks
+at $0.187$ at round 7 and ends at $0.100$, giving back $46.7\%$ of its peak
+against $2.7\%$ at $C = 0.5$. Our fixed $C = 1.0$ is conservative rather than
+optimal.
+
+\subsection{Carbon Cost by Grid}
+
+Table~\ref{tab:carbon} scales the measured HAR energy
+to 1000 runs and apply published grid carbon intensities, repeating the
+measured workload rather than extrapolating to other hardware. The cost
+attributable to privacy runs from $106$--$148$~gCO$_2$eq on Algeria's
+gas-dominated grid to $5.7$--$7.9$~g in Norway, a factor of $18.8$ for the
+same computation and the same guarantee. CIFAR-10 gives $115$--$146$~g against
+$6.1$--$7.8$~g, the same premium despite a workload five times larger per
+round. Selecting a privacy budget is therefore partly a geographic decision,
+which the privacy--utility framing cannot express.
 
 \begin{table}[t]
 \caption{Energy to reach a target accuracy on UCI-HAR (J net of idle; rounds
@@ -69,97 +153,19 @@ in parentheses). ``---'' marks targets not reached within 100 rounds.
 $\ddagger$: 2 of 3 seeds}
 \label{tab:target}
 \centering
-\begin{tabular}{lrrr}
+\begin{tabular}{lrrrr}
 \hline
-$\varepsilon$ & 0.40 & 0.50 & 0.70 \\
+$\varepsilon$ & 0.40 & 0.50 & 0.70 & 0.85 \\
 \hline
-0.5      & 179 (3.3) & 429$\ddagger$ (17.5) & --- \\
-1        & 188 (4.0) & 340 (12.0) & --- \\
-2        & 218 (5.7) & 280 (8.7)  & --- \\
-4        & 178 (3.0) & 238 (6.0)  & 1753 (77.7) \\
-8        & 197 (4.3) & 272 (8.0)  & 1682 (78.7) \\
-$\infty$ & 179 (5.3) & 204 (7.0)  &  300 (14.3) \\
+0.5      & 357 (13.0) & 334$\ddagger$ (12.0) & --- & --- \\
+1        & 201 (4.7) & 258 (7.7) & --- & --- \\
+2        & 197 (4.0) & 353 (12.0) & --- & --- \\
+4        & 210 (4.3) & 253 (6.3) & 1710 (74.3) & --- \\
+8        & 187 (3.3) & 269 (7.7) & 1699 (76.3) & --- \\
+$\infty$ & 185 (6.0) & 197 (7.0) & 301 (15.0) & 839 (57.0) \\
 \hline
 \end{tabular}
 \end{table}
-
-\subsection{An Energy-Optimal Stopping Round}
-
-Under a sufficiently tight budget the accuracy curve peaks and declines
-(Fig.~\ref{fig:convergence}), so training past the peak spends energy and
-loses accuracy at once. On HAR this
-appears at $\varepsilon = 0.5$ and only there: the model peaks at $0.4712$ at
-round 17 and ends at $0.4553$, the following 83 rounds accounting for
-$2477$~J, or $83\%$ of the run. At $\varepsilon \ge 1$ the HAR curves are
-still flat or rising at round 100.
-
-CIFAR-10, over 30 rounds, shows the effect across more budgets, the peak round
-ordering monotonically: 7 at $\varepsilon = 0.5$, then 11, 19, 24, and no peak
-before round 30 at $\varepsilon \ge 8$. At $\varepsilon = 0.5$ the model
-reaches $0.169$ at round 7 and ends at $0.161$, the remaining rounds
-accounting for $77\%$ of the run.
-
-The datasets bound the effect rather than replicating it: the mechanism is the
-same --- accumulated noise eventually dominates the aggregated update --- but
-where the crossover falls depends on the task. We state the finding
-conditionally. A tight budget induces an energy-optimal stopping round well
-before the budget expires, and training for a fixed round count regardless of
-$\varepsilon$ risks burning energy while degrading the model; we do not claim
-the monotone ordering generalises, since HAR does not reproduce it.
-
-\subsection{CIFAR-10 as a Secondary Check}
-
-CIFAR-10 reproduces the per-round result ($+60\%$ net of idle, flat to within
-$9.6\%$) and gives the stopping effect across more budgets. Reaching $0.20$
-accuracy costs $1482$~J net at $\varepsilon = 1$ against $406$~J without
-privacy, $3.65\times$, because the private run needs $11.7$ rounds against
-$2.3$; at $\varepsilon = 0.5$ it is never reached. Absolute accuracies are low
-($0.503$ without privacy, $0.16$--$0.31$ under it), as expected for a $62$k
-CNN over 30 non-IID rounds, which is why HAR carries the headline claims.
-
-\subsection{Ablations}
-
-We vary one factor at a time at $\varepsilon \in \{1, \infty\}$, three seeds
-per cell. On HAR only local epochs and the clipping norm are meaningful, since
-the federation size is fixed by the split and there is no Dirichlet parameter.
-
-\textbf{Under a tight budget the model becomes noise-limited.} At
-$\varepsilon = 1$ on HAR neither factor moves accuracy: final accuracy spans
-$2.6\%$ of its mean across one, two and five local epochs and $2.3\%$ across
-$C \in \{0.5, 1, 2\}$, both inside the $9.46\%$ floor. With $\sigma$ near
-$10$, the injected noise dominates what these settings contribute, and tuning
-them is not a route to a better private model.
-
-\textbf{The standard efficiency lever stops paying.} More local work per round
-is how federated learning ordinarily buys fewer rounds, and on HAR without
-privacy it works: energy to reach $0.70$ falls from $304$~J at one local epoch
-to $192$~J at five, a $1.6\times$ saving at unchanged accuracy. Under
-$\varepsilon = 1$ the saving vanishes --- the target is reached at no epoch
-count --- while energy per round still rises from $29$~J to $64$~J. Local
-steps enter $s_{\text{total}}$, so extra local work forces a larger $\sigma$
-and cancels the convergence gain.
-
-\textbf{On a harder task the lever inverts.} On CIFAR-10 at
-$\varepsilon = 1$, accuracy falls from $0.178$ to $0.134$ to $0.101$ across
-the same axis ($56\%$ against a $6.38\%$ floor), the peak round collapses from
-13 to 4, and post-peak waste grows from $2596$~J to $14819$~J.
-
-\textbf{Clipping is free in compute.} $C$ leaves energy per round unchanged on
-both datasets ($29$~J across all three values on HAR), so it acts purely on
-convergence --- not at all on HAR, but strongly on CIFAR-10 in a way final
-accuracy hides: $C = 2$ peaks at $0.191$ at round 8 and ends at $0.102$,
-giving back $46.5\%$ of its peak against $3.1\%$ at $C = 0.5$. Our fixed
-$C = 1.0$ is conservative rather than optimal.
-
-\subsection{Carbon Cost by Grid}
-
-Table~\ref{tab:carbon} and Fig.~\ref{fig:carbon} scale the measured HAR
-energy to 1000 runs and apply published grid carbon intensities; the scaling repeats the measured workload
-rather than extrapolating to other hardware. The cost attributable to privacy
-ranges from $105$--$133$~gCO$_2$eq on Algeria's gas-dominated grid to
-$5.6$--$7.1$~g in Norway, a factor of $18.8$ for the same computation and the
-same guarantee. Selecting a privacy budget is therefore partly a geographic
-decision, a consideration absent from the privacy--utility framing.
 
 \begin{table}[t]
 \caption{gCO$_2$eq per 1000 UCI-HAR training runs. ``Privacy'' is the private
@@ -170,10 +176,10 @@ minus non-private difference across $\varepsilon$}
 \hline
 Grid & DP & No DP & Privacy \\
 \hline
-Norway  &  22 &  15 &   6--7 \\
-France  &  46 &  33 &  12--15 \\
-Algeria & 405 & 289 & 105--133 \\
-India   & 523 & 374 & 135--171 \\
+Norway  &  21 &  15 &    6--8 \\
+France  &  46 &  32 &  12--17 \\
+Algeria & 403 & 281 & 106--148 \\
+India   & 521 & 363 & 137--191 \\
 \hline
 \end{tabular}
 \end{table}

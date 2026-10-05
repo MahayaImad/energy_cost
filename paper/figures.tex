@@ -1,47 +1,33 @@
-% Figure environments. All three are the UCI-HAR sweep, to match Section IV.
-% Regenerate with `python analyze.py results_har/`, which writes the PNGs into
-% results_har/; copy them beside main.tex (graphicspath is ./ only, on purpose
-% -- results/ holds identically named CIFAR-10 figures).
-% Inputted before Section IV in main.tex: floats only move forward.
+% Figures. Regenerate with:
+%   python analyze.py results_har/ --no-peak-markers   (HAR, no stopping marks)
+%   python analyze.py results/                          (CIFAR-10, with marks)
+% then copy each fig1_convergence.png under the names below. The carbon figure
+% is dropped: Table III carries the same four grids and the same values.
+% Inputted before Section IV in main.tex: LaTeX floats move forward only.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\columnwidth]{fig1_convergence.png}
+\includegraphics[width=\columnwidth]{fig_har_convergence.png}
 \caption{Central test accuracy against communication round on UCI-HAR over
-100 rounds, means of three seeds with $\pm 1$ SD bands. The marker is the
-energy-optimal stopping round, drawn only where accuracy ends more than half
-a point below its peak: here $\varepsilon = 0.5$ alone, peaking at $0.4712$ at
-round 17 and ending at $0.4553$. The remaining budgets are still flat or
-rising at round 100, so the peak ordering CIFAR-10 shows across budgets does
-not reproduce here; what does is that a tight enough budget makes further
-rounds cost energy and accuracy together.}
+100 rounds, means of three seeds with $\pm 1$ SD bands. No stopping marks are
+drawn because none is resolvable here: the largest peak-to-final drop is
+$0.032$ at $\varepsilon = 1$ against a $\pm 0.042$ across-seed spread. What
+the figure does show is the quality ceiling --- the non-private model reaches
+$0.88$ while $\varepsilon = 0.5$ plateaus near $0.47$, and no amount of
+further training closes that gap, because the training itself spends budget.}
 \label{fig:convergence}
 \end{figure}
 
-% fig2 (energy to target) dropped: Table~\ref{tab:target} carries the same
-% numbers with the unreached cells legible, which a bar chart cannot show.
-
 \begin{figure}[t]
 \centering
-\includegraphics[width=\columnwidth]{fig3_energy_per_round.png}
-\caption{Energy per round on UCI-HAR by privacy budget, net of idle, with the
-non-private baseline in grey and $\pm 1$ SD over three seeds. Private training
-costs $21.0$~J per round against $14.5$~J, an overhead of $+45\%$, and varies
-by $8.2\%$ of its mean across the five private conditions --- inside the
-$9.46\%$ measurement noise floor. This separates the two mechanisms: the step
-is an implementation overhead independent of $\varepsilon$, so every
-budget-dependent cost acts through the round count.}
-\label{fig:perround}
-\end{figure}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{fig4_carbon.png}
-\caption{Emissions for 1000 UCI-HAR training runs of the identical measured
-workload, across six grid carbon intensities. The vertical distance between a
-private curve and the non-private one is the carbon attributable to privacy:
-$105$--$133$~gCO$_2$eq on Algeria's gas-dominated grid against
-$5.6$--$7.1$~g in Norway, a factor of $18.8$ for the same computation and the
-same guarantee.}
-\label{fig:carbon}
+\includegraphics[width=\columnwidth]{fig_cifar_stopping.png}
+\caption{The same curves on CIFAR-10 over 30 rounds, where a stopping round is
+resolvable under a tight budget. Markers show the energy-optimal stopping
+round, drawn only where the peak-to-final drop exceeds the across-seed spread
+of final accuracy: at $\varepsilon = 0.5$ (round 8, all three seeds peaking
+within one round of each other) and $\varepsilon = 1$ (rounds 10--16). At
+$\varepsilon \ge 2$ and without privacy no decline clears the spread, so no
+marker is drawn. The rounds after the $\varepsilon = 0.5$ peak account for
+$60$--$68\%$ of the run's net energy and buy negative accuracy.}
+\label{fig:stopping}
 \end{figure}

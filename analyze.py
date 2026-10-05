@@ -173,6 +173,29 @@ def peak_round(group):
     return i + 1, float(mean[i]), float(mean[-1])
 
 
+def stopping_round_is_resolvable(group):
+    """Is this condition's decline bigger than its across-seed noise?
+
+    The same test per_seed_peak.py applies, so the figure and the text cannot
+    disagree. A fixed accuracy threshold would mark any curve whose mean
+    happens to end below its maximum, which on a noisy plateau is every curve.
+    """
+    pr, peak, final = peak_round(group)
+    if pr is None or len(group) < 2:
+        return False
+    finals = np.array([r["rounds"][-1].get("central_acc", np.nan)
+                       for r in group], float)
+    if np.isnan(finals).any():
+        return False
+    if peak - final <= float(finals.std(ddof=1)):
+        return False
+    # An argmax that lands outside the per-seed peaks is an artefact of
+    # averaging plateaus, not a round anyone could have stopped at.
+    peaks = [int(np.nanargmax([rd.get("central_acc", np.nan)
+                               for rd in r["rounds"]])) + 1 for r in group]
+    return min(peaks) <= pr <= max(peaks)
+
+
 def noise_floor(by_eps):
     """(watts, percent) of the worst within-condition across-seed spread.
 
@@ -552,10 +575,9 @@ def figures(by_eps, out: Path, peak_markers=True):
         x = np.arange(1, acc.shape[1] + 1)
         ax.plot(x, mean, label=eps_label(eps))
         ax.fill_between(x, mean - sd, mean + sd, alpha=0.18)
-        if peak_markers:
-            pr, peak, final = peak_round(group)
-            if pr and final < peak - 0.005:
-                ax.plot([pr], [peak], "v", color="k", ms=5)
+        if peak_markers and stopping_round_is_resolvable(group):
+            pr, peak, _ = peak_round(group)
+            ax.plot([pr], [peak], "v", color="k", ms=5)
     ax.set_xlabel("Communication round")
     ax.set_ylabel("Central test accuracy")
     ax.set_title("Convergence under a fixed privacy budget")
