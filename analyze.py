@@ -632,15 +632,25 @@ def ablations(runs, targets):
           f"{n_rounds}; 'wasted J' is the energy spent getting there.")
     print("    J/round and wasted J are NET of idle, matching the paper's tables.")
     # The floors are measured here rather than quoted from memory: the
-    # ablations turn entirely on whether a difference clears them, and the
-    # accuracy floor is the one the tuning conclusion rests on.
-    by_eps = defaultdict(list)
+    # ablations turn entirely on whether a difference clears them.
+    #
+    # Grouped by CELL -- the full configuration, seeds apart -- and not by
+    # epsilon. Grouping an ablation directory by epsilon lumps together runs
+    # that were deliberately configured differently, so the "across-seed
+    # spread" becomes the ablation effect itself and the floor swallows the
+    # very difference it is meant to judge. On CIFAR-10 that overstated it by
+    # a factor of 11.
+    by_cell = defaultdict(list)
     for r in runs:
-        by_eps[str(r["config"]["epsilon"])].append(r)
-    _, energy_pct = noise_floor(by_eps)
-    acc_abs, acc_pct = accuracy_floor(by_eps)
-    print(f"\n    Floors measured on these runs: energy {energy_pct:.2f}%, "
-          f"final accuracy +/-{acc_abs:.4f} ({acc_pct:.2f}%).")
+        c = r["config"]
+        by_cell[tuple(c.get(k) for k in ABLATION_FACTORS) + (str(c["epsilon"]),)].append(r)
+    replicated = sum(1 for g in by_cell.values() if len(g) >= 2)
+    _, energy_pct = noise_floor(by_cell)
+    acc_abs, acc_pct = accuracy_floor(by_cell)
+    print(f"\n    Floors from the across-seed spread WITHIN a cell "
+          f"({replicated} of {len(by_cell)} cells have 2+ seeds):")
+    print(f"      energy {energy_pct:.2f}%, "
+          f"final accuracy +/-{acc_abs:.4f} ({acc_pct:.2f}%)")
     print("    A difference below either is not an effect.")
     print("    (* = single seed, where no floor applies at all; re-run that")
     print('     axis with three seeds: SEEDS="0 1 2" AXES=epochs ./run_ablations.sh)')
