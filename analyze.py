@@ -1,1062 +1,311 @@
-"""Analysis for 'The Energy Cost of Privacy in Federated Learning'.
+"""Regenerate every table, figure and in-text number of the paper from the
+run JSONs in results/.
 
-Reads results/run_*.json and nothing else. The JSONs are the unit of
-analysis, so no number in the paper comes from a log line.
+    python analyze.py                 # prints everything, writes figures/
 
-    python analyze.py results_har/                    checks, tables, figures
-    python analyze.py results_har/ --check            the gate only, exit code
-    python analyze.py results_ablation_har/ --ablation
-    python analyze.py results_har/ --paper            numbers for the write-up
-    python analyze.py results_har/ --targets 0.4,0.5,0.7
-
-THE GATE (--check)
-The energy axis only means something if every epsilon condition ran the same
-workload. Before any energy number is quoted: wall-clock must be flat across
-the DP conditions, executed steps must match the steps the accountant was
-calibrated against, and every client must have trained on the GPU that NVML
-is watching. Effects smaller than the measured noise floor are not reported
-as effects; the floor is computed from the across-seed spread, not assumed.
+All energies are net of the idle baseline unless labelled gross.
 """
 
-import argparse
 import json
 import math
-import sys
-from collections import Counter, defaultdict
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
-# Grid carbon intensity, gCO2eq/kWh. Algeria's grid is overwhelmingly natural
-# gas, which is the regional hook: the same joules bought with the same
-# privacy budget emit very differently depending on where they burn.
-GRID_GCO2_PER_KWH = {
-    "Algeria": 488, "France": 56, "Germany": 344,
-    "USA (avg)": 369, "Norway": 26, "India": 631,
-}
-
-# Carbon is reported per this many runs. One run emits well under a gram,
-# which is too small to reason about. This is the SAME measured workload
-# repeated, not an extrapolation to real edge hardware.
+GRIDS = {"Norway": 26, "France": 56, "Germany": 344, "USA": 369,
+         "Algeria": 488, "India": 631}          # gCO2eq/kWh (Ember, 2024)
 CARBON_RUNS = 1000
 
-# What counts as a usable model differs by task. A target nothing reaches is
-# reported as unreached, which is itself a result -- but a whole column of
-# them tells the reader nothing. Override with --targets.
-TARGET_ACCS_BY_DATASET = {
-    "cifar10": (0.15, 0.20, 0.25),
-    "har": (0.50, 0.70, 0.85),
-}
 
-# The grids the carbon table tabulates, in the paper's order -- all six, so
-# the table in the paper is this script's output and nothing is typed by hand.
-PAPER_GRIDS = ("Norway", "France", "Germany", "USA (avg)", "Algeria", "India")
-
-ABLATION_FACTORS = {
-    "dirichlet_alpha": "alpha",
-    "num_supernodes": "clients",
-    "local_epochs": "epochs",
-    "clipping_norm": "C",
-}
-
-
-# --------------------------------------------------------------------- loading
+# ----------------------------------------------------------------- loading
 
 
 def eps_key(e):
-    """Sort key for an epsilon label. The non-private baseline sorts last."""
-    s = str(e).strip().lower()
-    return math.inf if s in ("inf", "infinity", "none", "") else float(s)
+    return math.inf if str(e) == "inf" else float(e)
 
 
-def eps_label(e):
-    return "no DP" if math.isinf(eps_key(e)) else f"$\\epsilon$={e}"
-
-
-# Fields written by the current server_app. A run missing any of them predates
-# a fix that changed what the numbers mean -- idle subtracted over the wrong
-# window, or step counts never recorded -- so it is rejected rather than
-# silently averaged in with runs that are not comparable to it.
-REQUIRED_TOTALS = ("energy_j", "wall_s_measured", "energy_j_net_idle", "idle_power_w")
-REQUIRED_ROUND = ("energy_j", "wall_s", "steps_sum", "expected_steps_sum")
-
-
-def load(d: Path):
-    """Load every run in a directory, newest schema only."""
-    paths = sorted(d.glob("run_*.json"))
-    if not paths:
-        sys.exit(f"no run_*.json found in {d}")
-
-    runs = []
-    for p in paths:
+def load(directory):
+    """{epsilon: [runs]}, epsilon sorted with the non-private baseline last."""
+    groups = defaultdict(list)
+    for p in sorted(Path(directory).glob("run_*.json")):
         r = json.loads(p.read_text())
-        missing = [k for k in REQUIRED_TOTALS if k not in r.get("totals", {})]
-        missing += [k for k in REQUIRED_ROUND if k not in (r["rounds"] or [{}])[0]]
-        if missing:
-            sys.exit(
-                f"{p.name} is missing {missing}.\n"
-                "It was written by an older server_app whose numbers are not "
-                "comparable with the current ones. Move it aside and re-run."
-            )
-        runs.append(r)
-
-    datasets = {str(r["config"]["dataset"]).lower() for r in runs}
-    if len(datasets) > 1:
-        sys.exit(
-            f"{d} mixes datasets {sorted(datasets)}; energy and accuracy are "
-            "not comparable across them. Keep one dataset per directory."
-        )
-
-    by_eps = defaultdict(list)
-    for r in runs:
-        by_eps[str(r["config"]["epsilon"])].append(r)
-    by_eps = dict(sorted(by_eps.items(), key=lambda kv: eps_key(kv[0])))
-    return runs, by_eps, datasets.pop()
+        groups[str(r["config"]["epsilon"])].append(r)
+    return dict(sorted(groups.items(), key=lambda kv: eps_key(kv[0])))
 
 
-def rounds_matrix(group, field):
-    """(n_seeds, n_rounds) array of a per-round field, NaN where absent."""
-    n = min(len(r["rounds"]) for r in group)
-    return np.array(
-        [[rd.get(field, np.nan) for rd in r["rounds"][:n]] for r in group], float
-    )
+def gross(r):
+    return r["totals"]["energy_j"]
 
 
-def measured_wall(r):
-    """Wall-clock the energy counter actually covers (not the whole process)."""
+def wall(r):
     return r["totals"]["wall_s_measured"]
 
 
-def total_energy(r, net=False):
-    """Gross, or idle-subtracted, round-bracketed energy in joules."""
-    t = r["totals"]
-    if not net:
-        return t["energy_j"]
-    return max(0.0, t["energy_j"] - t["idle_power_w"] * measured_wall(r))
+def net(r):
+    return max(0.0, gross(r) - r["totals"]["idle_power_w"] * wall(r))
 
 
-def energy_to_target(group, target, net=False):
-    """Mean joules to first reach `target` accuracy. Returns (J, round, n).
-
-    Seeds that never reach the target are excluded and counted: a target no
-    configuration reaches is a result, and must be shown as unreached rather
-    than quietly dropped.
-    """
-    joules, at_round = [], []
-    for r in group:
-        cumulative = 0.0
-        for rd in r["rounds"]:
-            cumulative += rd["energy_j"]
-            if rd.get("central_acc", float("nan")) >= target:
-                # Scale gross -> net by the run's own ratio, so this stays
-                # consistent with totals.energy_j_net_idle.
-                gross = total_energy(r)
-                ratio = total_energy(r, True) / gross if net and gross > 0 else 1.0
-                joules.append(cumulative * ratio)
-                at_round.append(rd["round"])
-                break
-    if not joules:
-        return None, None, 0
-    return float(np.mean(joules)), float(np.mean(at_round)), len(joules)
+def net_per_round(r):
+    return net(r) / len(r["rounds"])
 
 
-def peak_round(group):
-    """(round of peak mean accuracy, that peak, final-round accuracy).
-
-    Under a tight budget the curve peaks and then declines: past that round,
-    training spends joules AND loses accuracy.
-    """
-    acc = rounds_matrix(group, "central_acc")
-    mean = np.nanmean(acc, 0)
-    if np.isnan(mean).all():
-        return None, None, None
-    i = int(np.nanargmax(mean))
-    return i + 1, float(mean[i]), float(mean[-1])
+def acc_curve(r):
+    return np.array([rd["central_acc"] for rd in r["rounds"]])
 
 
-def stopping_round_is_resolvable(group):
-    """Is this condition's decline bigger than its across-seed noise?
-
-    The same test per_seed_peak.py applies, so the figure and the text cannot
-    disagree. A fixed accuracy threshold would mark any curve whose mean
-    happens to end below its maximum, which on a noisy plateau is every curve.
-    """
-    pr, peak, final = peak_round(group)
-    if pr is None or len(group) < 2:
-        return False
-    finals = np.array([r["rounds"][-1].get("central_acc", np.nan)
-                       for r in group], float)
-    if np.isnan(finals).any():
-        return False
-    if peak - final <= float(finals.std(ddof=1)):
-        return False
-    # An argmax that lands outside the per-seed peaks is an artefact of
-    # averaging plateaus, not a round anyone could have stopped at.
-    peaks = [int(np.nanargmax([rd.get("central_acc", np.nan)
-                               for rd in r["rounds"]])) + 1 for r in group]
-    return min(peaks) <= pr <= max(peaks)
+def final_acc(r):
+    return r["rounds"][-1]["central_acc"]
 
 
-def noise_floor(by_eps):
-    """(watts, percent) of the worst within-condition across-seed spread.
-
-    Nothing smaller than this is claimed as an effect anywhere in the paper.
-    """
-    worst_w, worst_pct = 0.0, 0.0
-    for group in by_eps.values():
-        if len(group) < 2:
-            continue
-        power = np.array([total_energy(r) / measured_wall(r) for r in group])
-        worst_w = max(worst_w, float(power.std(ddof=1)))
-        worst_pct = max(worst_pct, float(100 * power.std(ddof=1) / power.mean()))
-    return worst_w, worst_pct
+def mean(f, group):
+    return float(np.mean([f(r) for r in group]))
 
 
-def per_round_floor(by_eps):
-    """Worst within-condition across-seed spread of NET ENERGY PER ROUND.
+def worst_rel_sd(f, groups):
+    """Noise floor: worst within-condition across-seed SD, % of the mean."""
+    return max(100 * np.std(v, ddof=1) / np.mean(v)
+               for v in ([f(r) for r in g] for g in groups) if len(v) > 1)
 
-    noise_floor() is defined on board power, which is the right scale for a
-    power claim and the wrong one for an energy-per-round claim: the two
-    differ by the round duration, which also varies across seeds. A reviewer
-    rightly caught us comparing a spread in J/round against a floor in W, so
-    every claim now meets a floor measured on its own quantity.
-    """
-    worst_j, worst_pct = 0.0, 0.0
-    for group in by_eps.values():
-        if len(group) < 2:
-            continue
-        jr = np.array([total_energy(r, True) / len(r["rounds"])
-                       for r in group])
-        worst_j = max(worst_j, float(jr.std(ddof=1)))
-        worst_pct = max(worst_pct, float(100 * jr.std(ddof=1) / jr.mean()))
-    return worst_j, worst_pct
+
+def accuracy_floor(groups):
+    return max(np.std([final_acc(r) for r in g], ddof=1)
+               for g in groups if len(g) > 1)
 
 
 def permutation_f_test(groups, draws=200000, seed=0):
-    """(F, p) for 'these conditions differ', by permuting the seed labels.
-
-    A floor comparison answers the wrong question for an ordering claim: the
-    floor is the spread of one condition's seeds, while the quantity on trial
-    is the spread of the condition MEANS, which with three seeds each is
-    narrower by about root-three. With five conditions of three runs there is
-    no asymptotics to lean on, so we permute the fifteen measurements across
-    the budget labels and read the p-value off the null directly. No
-    distributional assumption, and it is exactly the question the claim makes.
-    """
-    groups = [np.asarray(g, float) for g in groups if len(g) > 1]
-    if len(groups) < 2:
-        return float("nan"), float("nan")
+    """(F, p) of a one-way F statistic, p from permuting the seed labels."""
+    groups = [np.asarray(g, float) for g in groups]
+    sizes = np.cumsum([len(g) for g in groups])[:-1]
 
     def f_stat(gs):
-        k = len(gs)
-        n = sum(len(g) for g in gs)
-        grand = np.mean(np.concatenate(gs))
-        between = sum(len(g) * (g.mean() - grand) ** 2 for g in gs)
+        allv = np.concatenate(gs)
+        k, n = len(gs), len(allv)
+        between = sum(len(g) * (g.mean() - allv.mean()) ** 2 for g in gs)
         within = sum(((g - g.mean()) ** 2).sum() for g in gs)
-        if within <= 0:
-            return float("inf")
         return (between / (k - 1)) / (within / (n - k))
 
     observed = f_stat(groups)
-    sizes = [len(g) for g in groups]
-    pool = np.concatenate(groups)
-    rng = np.random.default_rng(seed)
-    hits = 0
-    for _ in range(draws):
-        shuffled = rng.permutation(pool)
-        cut, parts = 0, []
-        for size in sizes:
-            parts.append(shuffled[cut:cut + size])
-            cut += size
-        if f_stat(parts) >= observed - 1e-12:
-            hits += 1
-    return float(observed), (hits + 1) / (draws + 1)
+    pool, rng = np.concatenate(groups), np.random.default_rng(seed)
+    hits = sum(f_stat(np.split(rng.permutation(pool), sizes)) >= observed - 1e-12
+               for _ in range(draws))
+    return observed, (hits + 1) / (draws + 1)
 
 
-def accuracy_floor(by_eps):
-    """Worst within-condition across-seed SD of FINAL accuracy.
-
-    The energy floor says what energy difference is resolvable. It says
-    nothing about accuracy, so an accuracy gap smaller than this one is not
-    an effect either -- which is what the ablations turn on.
-    """
-    worst_abs, worst_pct = 0.0, 0.0
-    for group in by_eps.values():
-        if len(group) < 2:
-            continue
-        finals = np.array([r["rounds"][-1].get("central_acc", np.nan)
-                           for r in group], float)
-        if np.isnan(finals).any() or finals.mean() == 0:
-            continue
-        sd = float(finals.std(ddof=1))
-        worst_abs = max(worst_abs, sd)
-        worst_pct = max(worst_pct, 100 * sd / float(finals.mean()))
-    return worst_abs, worst_pct
+def energy_to_target(group, target):
+    """(mean net J, mean round, seeds that reached it) to first reach target."""
+    joules, rounds = [], []
+    for r in group:
+        cum = 0.0
+        for rd in r["rounds"]:
+            cum += rd["energy_j"]
+            if rd["central_acc"] >= target:
+                joules.append(cum * net(r) / gross(r))   # gross -> net
+                rounds.append(rd["round"])
+                break
+    if not joules:
+        return None, None, 0
+    return np.mean(joules), np.mean(rounds), len(joules)
 
 
-def spearman(xs, ys):
-    """Rank correlation, ties averaged. 0.0 when undefined. (No scipy.)"""
-    if len(xs) < 3:
-        return 0.0
-
-    def ranks(vs):
-        order = sorted(range(len(vs)), key=lambda i: vs[i])
-        out = [0.0] * len(vs)
-        i = 0
-        while i < len(order):
-            j = i
-            while j + 1 < len(order) and vs[order[j + 1]] == vs[order[i]]:
-                j += 1
-            for k in range(i, j + 1):
-                out[order[k]] = (i + j) / 2.0 + 1.0
-            i = j + 1
-        return out
-
-    rx, ry = ranks(xs), ranks(ys)
-    mx, my = sum(rx) / len(rx), sum(ry) / len(ry)
-    num = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
-    den = (sum((a - mx) ** 2 for a in rx) * sum((b - my) ** 2 for b in ry)) ** 0.5
-    return num / den if den else 0.0
+def peak(group):
+    """(peak round, peak accuracy, final accuracy) of the mean curve."""
+    m = np.mean([acc_curve(r) for r in group], axis=0)
+    i = int(np.argmax(m))
+    return i + 1, m[i], m[-1]
 
 
-# ---------------------------------------------------------------------- checks
+# ---------------------------------------------------------------- sections
 
 
-def check_drift(runs) -> bool:
-    """Is wall-clock tracking epsilon, or just tracking execution order?
+def per_round_energy(name, by_eps, realised=None):
+    print(f"\n== Per-round energy, {name} (Table I) ==")
+    base = by_eps["inf"]
+    private = {e: g for e, g in by_eps.items() if e != "inf"}
+    b = mean(net_per_round, base)
+    print(f"{'eps':>5} {'Gross W':>8} {'Net W':>7} {'Net J/rd':>9} "
+          f"{'Overhead':>9} {'Worst eps':>10} {'sigma range':>14}")
+    for e, g in by_eps.items():
+        jr = mean(net_per_round, g)
+        row = (f"{e:>5} {mean(lambda r: gross(r) / wall(r), g):8.2f} "
+               f"{mean(lambda r: net(r) / wall(r), g):7.2f} {jr:9.1f}")
+        if e != "inf":
+            lo = min(rd["sigma_min"] for r in g for rd in r["rounds"])
+            hi = max(rd["sigma_max"] for r in g for rd in r["rounds"])
+            worst = f"{realised[e]:.3f}" if realised else "--"
+            row += f" {100 * (jr - b) / b:+8.1f}% {worst:>10} {lo:6.2f}-{hi:.2f}"
+        print(row)
 
-    Nothing in DP-SGD makes runtime depend on the magnitude of sigma: noise is
-    drawn from the same shaped tensor either way. So a wall-clock trend in
-    epsilon with flat step counts is more likely to be drift over the sweep,
-    and has to be ruled out before any of it is called a cost of privacy.
-    run_sweep.sh randomises run order so the two can be told apart at all.
-    """
-    dated = sorted((r for r in runs if r.get("timestamp_utc")),
-                   key=lambda r: r["timestamp_utc"])
-    if len(dated) < 4:
-        print("\n[5] Run-order drift: too few timestamped runs to assess")
-        return True
-
-    print("\n[5] Run-order drift (runs in execution order)")
-    print(f"    {'#':>3} {'eps':>6} {'seed':>5} {'wall_s':>9} {'gross W':>9}  timestamp")
-    walls, order, eps_vals = [], [], []
-    for i, r in enumerate(dated):
-        w = measured_wall(r)
-        e = eps_key(r["config"]["epsilon"])
-        walls.append(w)
-        order.append(float(i))
-        eps_vals.append(1e9 if math.isinf(e) else e)   # inf must sort last
-        print(f"    {i:>3} {str(r['config']['epsilon']):>6} {r['config']['seed']:>5} "
-              f"{w:>9.1f} {total_energy(r) / w:>9.2f}  {r['timestamp_utc'][:19]}")
-
-    # Restrict to DP runs, where epsilon actually varies and the non-private
-    # baseline cannot drive the correlation on its own.
-    dp = [(o, e, w) for o, e, w in zip(order, eps_vals, walls) if e < 1e9]
-    o_dp, e_dp, w_dp = ([d[i] for d in dp] for i in (0, 1, 2))
-    rho_order, rho_eps = spearman(o_dp, w_dp), spearman(e_dp, w_dp)
-    confound = spearman(o_dp, e_dp)
-
-    print(f"\n    wall_s vs execution order : rho = {rho_order:+.3f}")
-    print(f"    wall_s vs epsilon         : rho = {rho_eps:+.3f}")
-    print(f"    execution order vs epsilon: rho = {confound:+.3f}   <- design check")
-
-    if abs(confound) > 0.8:
-        print("\n    FAIL: epsilon and execution order are confounded by design.")
-        print("          The sweep visited epsilon in a fixed order, so no")
-        print("          correlation computed on this data can separate them.")
-        print("          Re-run with run_sweep.sh, which randomises the order.")
-        return False
-    if abs(rho_order) > 0.6 and abs(rho_order) >= abs(rho_eps):
-        print("\n    FAIL: under randomised order, wall-clock still tracks")
-        print("          execution order more than epsilon. The drift is real")
-        print("          and is not a privacy effect; find its cause first.")
-        return False
-    if abs(rho_eps) > 0.6:
-        print("\n    Wall-clock tracks epsilon under randomised order. That may")
-        print("    be real -- but with step counts flat (check [2]) the")
-        print("    mechanism is not obvious and needs explaining before it")
-        print("    goes in the paper. The accountant artefact looked like this.")
-    else:
-        print("\n    PASS: no strong drift in either direction.")
-    return True
+    jr = [mean(net_per_round, g) for g in private.values()]
+    over = [100 * (j - b) / b for j in jr]
+    wall_ratio = (np.mean([mean(lambda r: wall(r) / len(r["rounds"]), g)
+                           for g in private.values()])
+                  / mean(lambda r: wall(r) / len(r["rounds"]), base))
+    power_ratio = (np.mean([mean(lambda r: net(r) / wall(r), g)
+                            for g in private.values()])
+                   / mean(lambda r: net(r) / wall(r), base))
+    F, p = permutation_f_test([[net_per_round(r) for r in g]
+                               for g in private.values()])
+    groups = list(by_eps.values())
+    print(f"private {np.mean(jr):.1f} J/round vs {b:.1f} without privacy: "
+          f"overhead {np.mean(over):+.0f}% (range {min(over):+.1f}% to "
+          f"{max(over):+.1f}%, spread {100 * np.ptp(jr) / np.mean(jr):.1f}% "
+          f"of the mean)")
+    print(f"wall-clock {100 * (wall_ratio - 1):+.1f}%, "
+          f"net power {100 * (power_ratio - 1):+.1f}%")
+    print(f"noise floors: energy/round {worst_rel_sd(net_per_round, groups):.1f}%, "
+          f"board power {worst_rel_sd(lambda r: gross(r) / wall(r), groups):.1f}%, "
+          f"final accuracy +/-{accuracy_floor(groups):.3f}")
+    print(f"permutation test, dependence of energy/round on eps: "
+          f"F = {F:.2f}, p = {p:.2f}")
+    idle = [r["totals"]["idle_power_w"] for g in groups for r in g]
+    idle_sd = [r["totals"]["idle_power_w_sd"] for g in groups for r in g]
+    print(f"idle baseline {np.mean(idle):.1f} W (sd {np.mean(idle_sd):.2f} W)")
 
 
-def check(by_eps, runs) -> bool:
-    ok = True
-    print("=" * 68)
-    print("PHASE-1 VERIFICATION")
-    print("=" * 68)
-
-    # [0] Completeness. Every later number is a mean over seeds, and a
-    # condition short a seed weakens exactly the comparison the paper rests
-    # on -- while looking identical to a finished sweep in every other check.
-    counts = {eps: len(g) for eps, g in by_eps.items()}
-    expected = max(counts.values())
-    print(f"\n[0] Sweep completeness: {sum(counts.values())}/"
-          f"{expected * len(counts)} runs")
-    short = {e: n for e, n in counts.items() if n < expected}
-    for e, n in short.items():
-        seeds = sorted(r["config"]["seed"] for r in by_eps[e])
-        print(f"    eps={e:>5} : {n}/{expected}, seeds {seeds}  <- INCOMPLETE")
-    if short:
-        print("    FAIL: re-run the sweep to fill these in (run_sweep.sh skips")
-        print("          runs whose JSON already exists), then re-check.")
-        ok = False
-    else:
-        print(f"    ok: all {len(counts)} conditions have {expected} seeds")
-
-    # [1] Flat wall-clock. A monotone rise with epsilon means compute is
-    # drifting with the budget, and the energy axis is measuring workload size.
-    print("\n[1] Wall-clock flatness across epsilon")
-    print(f"    {'eps':>6} {'n':>3} {'wall_s':>18} {'energy_J':>18} {'steps/round':>12}")
-    dp_walls = {}
-    for eps, group in by_eps.items():
-        w = np.array([measured_wall(r) for r in group])
-        e = np.array([total_energy(r) for r in group])
-        steps = np.nanmean(rounds_matrix(group, "steps_sum"))
-        print(f"    {eps:>6} {len(group):>3} {w.mean():>10.1f} +/-{w.std():>5.1f} "
-              f"{e.mean():>10.0f} +/-{e.std():>5.0f} {steps:>12.0f}")
-        if not math.isinf(eps_key(eps)):
-            dp_walls[eps] = w.mean()
-
-    if len(dp_walls) >= 2:
-        vals = np.array(list(dp_walls.values()))
-        spread = 100 * (vals.max() - vals.min()) / vals.mean()
-        ordered = [dp_walls[e] for e in sorted(dp_walls, key=eps_key)]
-        print(f"\n    spread across DP conditions: {spread:.1f}% of mean")
-        if all(a < b for a, b in zip(ordered, ordered[1:])):
-            print("    FAIL: wall-clock still rises monotonically with epsilon.")
-            print("          Compute is drifting with the privacy budget.")
-            ok = False
-        elif spread > 5.0:
-            print(f"    FAIL: {spread:.1f}% spread exceeds the 5% tolerance.")
-            ok = False
-        else:
-            print("    PASS: flat within tolerance, ordering collapsed into noise.")
-
-    # [2] Compute parity against the privacy claim.
-    print("\n[2] Executed steps vs steps the accountant was calibrated for")
-    print("    A shortfall of a step or two per round is an Opacus artefact:")
-    print("    it sets sample_rate = 1/len(loader), then takes int(1/rate), and")
-    print("    for some partition sizes the float reciprocal lands just under")
-    print("    the integer and floors down. It runs FEWER steps than the")
-    print("    accountant charged for, so epsilon stays an upper bound. Only a")
-    print("    shortfall above 0.5% of a round's steps is material.")
-    for eps, group in by_eps.items():
-        got = rounds_matrix(group, "steps_sum")
-        want = rounds_matrix(group, "expected_steps_sum")
-        gap = float(np.nanmax(np.abs(got - want)))
-        pct = 100 * gap / max(float(np.nanmean(want)), 1.0)
-        over_ran = float(np.nanmax(got - want)) > 0
-        flag = "MATERIAL" if pct > 0.5 else ("over-run" if over_ran else "ok")
-        print(f"    {eps:>6} : max |executed - calibrated| = {gap:.0f} steps "
-              f"({pct:.2f}% of round)  [{flag}]")
-        if pct > 0.5 or over_ran:
-            ok = False
-
-    # [3] GPU residency. Clients on CPU means NVML measured an idle card.
-    print("\n[3] Clients trained on the GPU")
-    for eps, group in by_eps.items():
-        deficit = np.nanmin(rounds_matrix(group, "clients_on_cuda")
-                            - rounds_matrix(group, "n_clients"))
-        print(f"    {eps:>6} : {'ok' if deficit >= 0 else 'FAIL -- some ran on CPU'}")
-        ok = ok and deficit >= 0
-
-    # [3b] Idle baselines are all the same card doing nothing, so they must
-    # agree. One that stands out was probed before the GPU wound down from the
-    # previous run, and net energy = gross - idle*t, so it under-states that
-    # run's net energy without disturbing anything else.
-    print("\n[3b] Idle baseline agreement across runs")
-    idles = [(str(r["config"]["epsilon"]), r["config"]["seed"],
-              r["totals"]["idle_power_w"]) for r in runs]
-    median = float(np.median([v for _, _, v in idles]))
-    off = [(e, s, v) for e, s, v in idles
-           if abs(v - median) > max(2.0, 0.10 * median)]
-    unsettled = [(str(r["config"]["epsilon"]), r["config"]["seed"]) for r in runs
-                 if r["totals"].get("idle_settled") is False]
-    print(f"    median {median:.2f} W over {len(idles)} runs")
-    for e, s, v in off:
-        print(f"    eps={e:>5} seed={s}: {v:.2f} W  <- {v - median:+.1f} W off median")
-    for e, s in unsettled:
-        print(f"    eps={e:>5} seed={s}: probe never settled")
-    if off or unsettled:
-        print("    FAIL: contaminated idle baseline -- the GPU had not wound")
-        print("          down when the probe started. Net energy for these runs")
-        print("          is wrong; re-run them.")
-        ok = False
-    else:
-        print("    ok: all baselines within tolerance of the median")
-
-    # [3c] Very short rounds sit near the limit of a bracketed counter: GPU
-    # power swings over tens of milliseconds, so a sub-second round averages
-    # almost none of that away. The energy is still correct, just noisier.
-    durations = [rd["wall_s"] for r in runs for rd in r["rounds"]]
-    mean_round = float(np.mean(durations))
-    print(f"\n[3c] Mean round duration {mean_round:.2f} s")
-    if mean_round < 1.0:
-        print("    WARNING: rounds under 1 s. Per-round energy is a noisy")
-        print("             estimate here; prefer whole-run totals.")
-
-    w, pct = noise_floor(by_eps)
-    print(f"\n[4] Measurement noise floor: +/-{w:.2f} W ({pct:.2f}%)")
-    print("    No effect smaller than this is resolvable. State it before")
-    print("    claiming any energy difference.")
-
-    ok = check_drift(runs) and ok
-    print("\n" + ("VERDICT: PASS" if ok else "VERDICT: FAIL"))
-    return ok
+def target_table(name, by_eps, targets):
+    print(f"\n== Net energy (J) to target accuracy, {name} (Table II) ==")
+    print("mean rounds in parentheses; '-' unreached; '*' not all seeds")
+    print(f"{'eps':>5}" + "".join(f"{t:>15.2f}" for t in targets))
+    for e, g in by_eps.items():
+        cells = []
+        for t in targets:
+            j, rd, n = energy_to_target(g, t)
+            cells.append("-" if n == 0 else
+                         f"{j:.0f}{'*' if n < len(g) else ''} ({rd:.1f})")
+        print(f"{e:>5}" + "".join(f"{c:>15}" for c in cells))
 
 
-# ---------------------------------------------------------------------- tables
+def stopping_rounds(name, by_eps):
+    """A stopping round is reported only when the mean curve's peak-to-final
+    drop exceeds the across-seed SD of final accuracy and the mean's peak
+    lies within the per-seed peak rounds."""
+    print(f"\n== Energy-optimal stopping round, {name} (Section IV-C) ==")
+    for e, g in by_eps.items():
+        pr, pk, fin = peak(g)
+        sd = np.std([final_acc(r) for r in g], ddof=1)
+        seeds = []
+        for r in sorted(g, key=lambda r: r["config"]["seed"]):
+            a = acc_curve(r)
+            i = int(np.argmax(a))
+            e_round = [rd["energy_j"] for rd in r["rounds"]]
+            seeds.append(f"rd {i + 1} drop {a[i] - a[-1]:.3f} "
+                         f"{100 * sum(e_round[i + 1:]) / sum(e_round):.0f}% after")
+        peaks = [int(np.argmax(acc_curve(r))) + 1 for r in g]
+        ok = pk - fin > sd and min(peaks) <= pr <= max(peaks)
+        print(f"eps {e:>4}: mean peak {pk:.3f} at rd {pr}, final {fin:.3f}, "
+              f"drop {pk - fin:.3f} vs +/-{sd:.3f} -> "
+              f"{'RESOLVED' if ok else 'not resolved'}")
+        print("          per seed: " + "; ".join(seeds))
 
 
-def tables(by_eps, targets):
-    print("\n" + "=" * 68)
-    print("RESULTS")
-    print("=" * 68)
-
-    print("\n-- Per-round energy (separates fixed overhead from slowdown) --")
-    print("    The overhead below is per-round ENERGY, net of idle. Power is")
-    print("    the wrong basis: DP rounds draw more power AND run longer, so a")
-    print("    power ratio drops the second factor and understates the cost.")
-    print(f"    {'eps':>6} {'gross W':>9} {'net W':>9} {'gross J/rd':>11} "
-          f"{'net J/rd':>9} {'sigma range':>18}")
-
-    def net_per_round(group):
-        return float(np.mean([total_energy(r, True) / len(r["rounds"])
-                              for r in group]))
-
-    baseline = None
-    for eps, group in by_eps.items():
-        gross_w = np.mean([total_energy(r) / measured_wall(r) for r in group])
-        net_w = np.mean([total_energy(r, True) / measured_wall(r) for r in group])
-        gross_jr = np.mean([total_energy(r) / len(r["rounds"]) for r in group])
-        lo = rounds_matrix(group, "sigma_min")
-        hi = rounds_matrix(group, "sigma_max")
-        sigma = ("--" if np.isnan(lo).all()
-                 else f"{np.nanmin(lo):.3f} - {np.nanmax(hi):.3f}")
-        if math.isinf(eps_key(eps)):
-            baseline = net_per_round(group)
-        print(f"    {eps:>6} {gross_w:>9.2f} {net_w:>9.2f} {gross_jr:>11.0f} "
-              f"{net_per_round(group):>9.1f} {sigma:>18}")
-
-    if baseline:
-        print("\n    DP overhead per round vs no-DP, net of idle:")
-        private = []
-        for eps, group in by_eps.items():
-            if math.isinf(eps_key(eps)):
-                continue
-            jr = net_per_round(group)
-            private.append(jr)
-            print(f"      eps={eps:>4}: {100 * (jr - baseline) / baseline:+6.1f}%")
-        mean = float(np.mean(private))
-        spread = 100 * (max(private) - min(private)) / mean
-        _, floor_pct = noise_floor(by_eps)
-        print(f"\n      mean across DP conditions: "
-              f"{100 * (mean - baseline) / baseline:+.0f}%")
-        print(f"      spread across DP conditions: {spread:.1f}% of mean, "
-              f"against a {floor_pct:.1f}% noise floor")
-        if spread <= floor_pct * 1.75:
-            print("      -> flat in epsilon within resolution: the per-round")
-            print("         cost of DP is a FIXED implementation overhead, and")
-            print("         everything budget-dependent lives in the round")
-            print("         count, which energy-to-target measures.")
-        else:
-            print("      -> NOT flat: the per-round cost varies with epsilon by")
-            print("         more than the instrument can attribute to noise.")
-
-    print("\n-- Energy to target accuracy (the headline metric) --")
-    for t in targets:
-        print(f"\n    target acc = {t:.2f}")
-        print(f"    {'eps':>6} {'gross J':>12} {'net J':>12} {'round':>7} {'seeds':>12}")
-        for eps, group in by_eps.items():
-            j, rd, n = energy_to_target(group, t)
-            j_net, _, _ = energy_to_target(group, t, net=True)
-            if n == 0:
-                print(f"    {eps:>6} {'UNREACHED':>12} {'UNREACHED':>12} "
-                      f"{'--':>7} {f'0/{len(group)}':>12}")
-            else:
-                print(f"    {eps:>6} {j:>12.0f} {j_net:>12.0f} {rd:>7.1f} "
-                      f"{f'{n}/{len(group)}':>12}")
-
-    print("\n-- Energy-optimal stopping round (peak-then-decline) --")
-    print(f"    {'eps':>6} {'peak round':>11} {'peak acc':>10} {'final acc':>10} "
-          f"{'wasted J':>10}")
-    for eps, group in by_eps.items():
-        pr, peak, final = peak_round(group)
-        if pr is None:
-            continue
-        per_round = np.mean([total_energy(r) / len(r["rounds"]) for r in group])
-        n_rounds = min(len(r["rounds"]) for r in group)
-        note = "  <- declines after peak" if final < peak - 0.005 else ""
-        print(f"    {eps:>6} {pr:>11} {peak:>10.4f} {final:>10.4f} "
-              f"{per_round * (n_rounds - pr):>10.0f}{note}")
-
-    print(f"\n-- Carbon: gCO2eq per {CARBON_RUNS} training runs, by grid --")
-    print("    (the same measured workload repeated, not an extrapolation)")
-    header = "".join(f"{k:>13}" for k in GRID_GCO2_PER_KWH)
-
-    def kwh_per_scale(group):
-        return np.mean([total_energy(r) for r in group]) / 3.6e6 * CARBON_RUNS
-
-    print(f"    {'eps':>6}{header}")
-    for eps, group in by_eps.items():
-        kwh = kwh_per_scale(group)
-        print(f"    {eps:>6}" + "".join(f"{kwh * g:>13.1f}"
-                                        for g in GRID_GCO2_PER_KWH.values()))
-
-    base = [g for e, g in by_eps.items() if math.isinf(eps_key(e))]
-    if base:
-        base_kwh = kwh_per_scale(base[0])
-        print("\n    Carbon cost OF PRIVACY (DP minus no-DP), same scale:")
-        print(f"    {'eps':>6}{header}")
-        for eps, group in by_eps.items():
-            if math.isinf(eps_key(eps)):
-                continue
-            delta = kwh_per_scale(group) - base_kwh
-            print(f"    {eps:>6}" + "".join(f"{delta * g:>13.1f}"
-                                            for g in GRID_GCO2_PER_KWH.values()))
+def final_accuracy(name, by_eps):
+    print(f"\n== Final accuracy, {name} ==")
+    for e, g in by_eps.items():
+        f = [final_acc(r) for r in g]
+        print(f"eps {e:>4}: mean {np.mean(f):.3f} (seeds {min(f):.3f}-{max(f):.3f})")
 
 
-# --------------------------------------------------------------------- figures
+def carbon_table(by_eps):
+    print(f"\n== gCO2eq per {CARBON_RUNS} HAR runs (Table III) ==")
+    kwh = lambda g: mean(gross, g) / 3.6e6 * CARBON_RUNS
+    base = kwh(by_eps["inf"])
+    dp = [kwh(g) for e, g in by_eps.items() if e != "inf"]
+    print(f"{'Grid':<8} {'DP':>5} {'No DP':>6} {'Privacy':>12}")
+    for grid, c in GRIDS.items():
+        lo, hi = (min(dp) - base) * c, (max(dp) - base) * c
+        print(f"{grid:<8} {np.mean(dp) * c:5.0f} {base * c:6.0f} "
+              f"{lo:6.1f}-{hi:.1f}")
 
 
-def figures(by_eps, out: Path, peak_markers=True):
-    """The three figures the paper uses. Written into `out`."""
+def ablations(name, directory, target):
+    """One factor at a time at eps in {1, inf}; the others at epochs=1, C=1."""
+    runs = [r for g in load(directory).values() for r in g]
+    # The CIFAR-10 directory also holds single-seed alpha / client-count runs
+    # that the paper does not report; keep the baseline partition only.
+    runs = [r for r in runs if r["config"]["dirichlet_alpha"] == 0.5
+            and r["config"]["num_supernodes"] in (20, 21)]
+    cells = defaultdict(list)
+    for r in runs:
+        c = r["config"]
+        cells[(c["local_epochs"], c["clipping_norm"], str(c["epsilon"]))].append(r)
+
+    print(f"\n== Ablations, {name} (Section IV-E) ==")
+    print(f"floors within a cell: board power "
+          f"{worst_rel_sd(lambda r: gross(r) / wall(r), cells.values()):.1f}%, "
+          f"final accuracy +/-{accuracy_floor(cells.values()):.3f}")
+    print(f"{'factor':>10} {'eps':>4} {'n':>2} {'J/rd':>5} {'peak rd':>8} "
+          f"{'peak':>6} {'final':>6} {'lost':>6} {'J after peak':>13} "
+          f"{f'J to {target}':>9}")
+    axes = (("epochs", 0, lambda k: k[1] == 1.0),    # vary epochs, C = 1
+            ("C", 1, lambda k: k[0] == 1))           # vary C, epochs = 1
+    for label, field, others_at_base in axes:
+        for key in sorted(filter(others_at_base, cells)):
+            g = cells[key]
+            jr = mean(net_per_round, g)
+            pr, pk, fin = peak(g)
+            j, _, n = energy_to_target(g, target)
+            print(f"{label + '=' + str(key[field]):>10} {key[2]:>4} {len(g):>2} {jr:5.0f} "
+                  f"{pr:>8} {pk:6.3f} {fin:6.3f} {100 * (pk - fin) / pk:5.1f}% "
+                  f"{jr * (len(g[0]['rounds']) - pr):13.0f} "
+                  f"{'-' if n == 0 else f'{j:.0f}':>9}")
+
+
+def figures(by_eps, out="figures"):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    labels = list(by_eps)
+    Path(out).mkdir(exist_ok=True)
+    label = lambda e: "no DP" if e == "inf" else f"$\\epsilon$={e}"
 
-    # Convergence, with a marker on any condition that declines after its peak.
     fig, ax = plt.subplots(figsize=(5.5, 3.6))
-    for eps, group in by_eps.items():
-        acc = rounds_matrix(group, "central_acc")
-        mean, sd = np.nanmean(acc, 0), np.nanstd(acc, 0)
-        x = np.arange(1, acc.shape[1] + 1)
-        ax.plot(x, mean, label=eps_label(eps))
-        ax.fill_between(x, mean - sd, mean + sd, alpha=0.18)
-        if peak_markers and stopping_round_is_resolvable(group):
-            pr, peak, _ = peak_round(group)
-            ax.plot([pr], [peak], "v", color="k", ms=5)
-    ax.set_xlabel("Communication round")
-    ax.set_ylabel("Central test accuracy")
-    ax.set_title("Convergence under a fixed privacy budget")
+    for e, g in by_eps.items():
+        acc = np.array([acc_curve(r) for r in g])
+        m, sd = acc.mean(0), acc.std(0)
+        x = np.arange(1, len(m) + 1)
+        ax.plot(x, m, label=label(e))
+        ax.fill_between(x, m - sd, m + sd, alpha=0.18)
+    ax.set(xlabel="Communication round", ylabel="Central test accuracy",
+           title="Convergence under a fixed privacy budget")
     ax.grid(alpha=0.3)
     ax.legend(fontsize=7, ncol=2)
     fig.tight_layout()
-    fig.savefig(out / "fig1_convergence.png", dpi=200)
-    plt.close(fig)
+    fig.savefig(f"{out}/fig1_convergence.png", dpi=200)
 
-    # Per-round energy: a flat DP plateau a fixed step above the baseline is
-    # what separates the fixed overhead from the convergence slowdown.
     fig, ax = plt.subplots(figsize=(5.5, 3.6))
-    per_round = [[total_energy(r, True) / len(r["rounds"]) for r in by_eps[e]]
-                 for e in labels]
-    ax.bar(range(len(labels)), [np.mean(v) for v in per_round],
-           yerr=[np.std(v) for v in per_round], capsize=3,
-           color=["tab:gray" if math.isinf(eps_key(e)) else "tab:blue"
-                  for e in labels])
-    ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels([eps_label(e) for e in labels], fontsize=7)
-    ax.set_ylabel("Energy per round (J, net of idle)")
-    ax.set_title("Per-round energy: fixed DP overhead, flat in $\\epsilon$")
+    vals = [[net_per_round(r) for r in g] for g in by_eps.values()]
+    ax.bar(range(len(vals)), [np.mean(v) for v in vals],
+           yerr=[np.std(v) for v in vals], capsize=3,
+           color=["tab:gray" if e == "inf" else "tab:blue" for e in by_eps])
+    ax.set_xticks(range(len(vals)), [label(e) for e in by_eps], fontsize=7)
+    ax.set(ylabel="Energy per round (J, net of idle)",
+           title="Per-round energy: fixed DP overhead, flat in $\\epsilon$")
     ax.grid(alpha=0.3, axis="y")
     fig.tight_layout()
-    fig.savefig(out / "fig3_energy_per_round.png", dpi=200)
-    plt.close(fig)
-
-    # The same workload against different grids.
-    fig, ax = plt.subplots(figsize=(5.5, 3.6))
-    regions = list(GRID_GCO2_PER_KWH)
-    for eps in labels:
-        kwh = np.mean([total_energy(r) for r in by_eps[eps]]) / 3.6e6 * CARBON_RUNS
-        ax.plot(regions, [kwh * GRID_GCO2_PER_KWH[g] for g in regions], "o-",
-                label=eps_label(eps), ms=4)
-    ax.set_ylabel(f"gCO$_2$eq per {CARBON_RUNS} runs")
-    ax.set_title("Identical workload, different grid")
-    ax.grid(alpha=0.3)
-    ax.tick_params(axis="x", labelsize=7)
-    ax.legend(fontsize=7, ncol=2)
-    fig.tight_layout()
-    fig.savefig(out / "fig4_carbon.png", dpi=200)
-    plt.close(fig)
-
-    print(f"\nwrote fig1, fig3, fig4 to {out}/")
-
-
-# ------------------------------------------------------------------- ablations
-
-
-def ablations(runs, targets):
-    """Each ablation factor against the baseline configuration.
-
-    These runs deliberately change the workload, so unlike the main sweep a
-    per-round energy difference here is expected and is the point. What they
-    show is how the cost of privacy responds to a deployment choice.
-    """
-    # The baseline is READ FROM THE DATA. Each ablation varies one factor and
-    # holds the rest at baseline, so the baseline value of every factor is the
-    # one appearing in the most runs. Hardcoding it broke HAR silently once:
-    # CIFAR's baseline has 20 supernodes and HAR has 21, so the "others at
-    # baseline" filter rejected every run and the tables came out empty.
-    base = {}
-    for field in ABLATION_FACTORS:
-        values = [r["config"].get(field) for r in runs
-                  if r["config"].get(field) is not None]
-        if values:
-            base[field] = Counter(values).most_common(1)[0][0]
-    print("\n    baseline read from the data: "
-          + ", ".join(f"{ABLATION_FACTORS[k]}={v}" for k, v in base.items()))
-
-    n_rounds = min((len(r["rounds"]) for r in runs), default=0)
-    target = targets[len(targets) // 2]
-    print(f"    'lost' is accuracy given back between the peak and round "
-          f"{n_rounds}; 'wasted J' is the energy spent getting there.")
-    print("    J/round and wasted J are NET of idle, matching the paper's tables.")
-    # The floors are measured here rather than quoted from memory: the
-    # ablations turn entirely on whether a difference clears them.
-    #
-    # Grouped by CELL -- the full configuration, seeds apart -- and not by
-    # epsilon. Grouping an ablation directory by epsilon lumps together runs
-    # that were deliberately configured differently, so the "across-seed
-    # spread" becomes the ablation effect itself and the floor swallows the
-    # very difference it is meant to judge. On CIFAR-10 that overstated it by
-    # a factor of 11.
-    by_cell = defaultdict(list)
-    for r in runs:
-        c = r["config"]
-        by_cell[tuple(c.get(k) for k in ABLATION_FACTORS) + (str(c["epsilon"]),)].append(r)
-    replicated = sum(1 for g in by_cell.values() if len(g) >= 2)
-    _, energy_pct = noise_floor(by_cell)
-    acc_abs, acc_pct = accuracy_floor(by_cell)
-    print(f"\n    Floors from the across-seed spread WITHIN a cell "
-          f"({replicated} of {len(by_cell)} cells have 2+ seeds):")
-    print(f"      energy {energy_pct:.2f}%, "
-          f"final accuracy +/-{acc_abs:.4f} ({acc_pct:.2f}%)")
-    print("    A difference below either is not an effect.")
-    print("    (* = single seed, where no floor applies at all; re-run that")
-    print('     axis with three seeds: SEEDS="0 1 2" AXES=epochs ./run_ablations.sh)')
-
-    for field, label in ABLATION_FACTORS.items():
-        varied = sorted({r["config"].get(field) for r in runs
-                         if r["config"].get(field) is not None})
-        if len(varied) < 2:
-            continue                      # left at baseline: not ablated
-        print(f"\n-- {label} ({field}) --")
-        print(f"    {'value':>8} {'eps':>6} {'n':>3} {'J/round':>9} {'peak rd':>8} "
-              f"{'peak acc':>9} {'final acc':>10} {'lost':>7} {'wasted J':>9} "
-              f"{f'J to {target:.2f}':>11}")
-        for value in varied:
-            # Hold every other factor at baseline: one thing varies at a time.
-            selected = [
-                r for r in runs
-                if r["config"].get(field) == value
-                and all(r["config"].get(k, base[k]) == base[k]
-                        for k in base if k != field)
-            ]
-            for eps in sorted({str(r["config"]["epsilon"]) for r in selected},
-                              key=eps_key):
-                group = [r for r in selected
-                         if str(r["config"]["epsilon"]) == eps]
-                jr = np.mean([total_energy(r, True) / len(r["rounds"])
-                              for r in group])
-                j_target, _, n_hit = energy_to_target(group, target, net=True)
-                pr, peak, final = peak_round(group)
-                rounds = min(len(r["rounds"]) for r in group)
-                wasted = jr * (rounds - pr) if pr else 0.0
-                lost = 100 * (peak - final) / peak if peak else 0.0
-                print(f"    {str(value):>8} {eps:>6} {len(group):>3} {jr:>9.0f} "
-                      f"{str(pr):>8} {peak:>9.4f} {final:>10.4f} {lost:>6.1f}% "
-                      f"{wasted:>9.0f} "
-                      f"{('unreached' if n_hit == 0 else f'{j_target:.0f}'):>11}"
-                      + (" *" if len(group) < 2 else ""))
-
-
-# ----------------------------------------------------------------- paper notes
-
-
-def paper(runs, by_eps):
-    """The configuration and measurement numbers the write-up needs.
-
-    Read off the JSONs, so the paper and the data cannot drift apart. The
-    prose that used to live here now lives in paper/methodology.tex.
-    """
-    one = runs[0]["config"]
-    seeds = sorted({r["config"]["seed"] for r in runs})
-    hw = runs[0].get("hardware", {})
-
-    print("=" * 68)
-    print("PAPER NUMBERS -- transcribe, do not retype from memory")
-    print("=" * 68)
-
-    print("\n### Configuration\n")
-    for key in ("dataset", "num_rounds", "num_supernodes", "fraction_train",
-                "dirichlet_alpha", "local_epochs", "batch_size",
-                "learning_rate", "clipping_norm", "delta"):
-        print(f"    {key:<18} {one[key]}")
-    print(f"    {'seeds':<18} {seeds}")
-    print(f"    {'GPU':<18} {hw.get('gpu')}")
-    print(f"    {'torch / cuda':<18} {hw.get('torch')} / {hw.get('cuda')}")
-
-    print("\n### Per-client sigma range (varies with partition size)\n")
-    for eps, group in by_eps.items():
-        if math.isinf(eps_key(eps)):
-            continue
-        lo, hi = rounds_matrix(group, "sigma_min"), rounds_matrix(group, "sigma_max")
-        if not np.isnan(lo).all():
-            print(f"    eps={eps:>4}   sigma {np.nanmin(lo):.3f} - {np.nanmax(hi):.3f}")
-
-    idle = np.mean([r["totals"]["idle_power_w"] for r in runs])
-    idle_sd = np.mean([r["totals"]["idle_power_w_sd"] for r in runs])
-    w, pct = noise_floor(by_eps)
-    print("\n### Measurement\n")
-    print("    NVML nvmlDeviceGetTotalEnergyConsumption, a hardware counter in")
-    print("    accumulated mJ, differenced per round -- measured, not modelled.")
-    print(f"    Idle baseline      {idle:.2f} W (sd {idle_sd:.2f})")
-    print(f"    Noise floor        +/-{w:.2f} W ({pct:.2f}%)")
-    print(f"    -> no effect below ~{pct:.0f}% is resolvable.\n")
-
-
-# ----------------------------------------------------------------------- latex
-
-
-def _net_per_round(group):
-    return float(np.mean([total_energy(r, True) / len(r["rounds"]) for r in group]))
-
-
-def _kwh_scaled(group):
-    return float(np.mean([total_energy(r) for r in group])) / 3.6e6 * CARBON_RUNS
-
-
-def _gross_w(group):
-    return float(np.mean([total_energy(r) / measured_wall(r) for r in group]))
-
-
-def _net_w(group):
-    return float(np.mean([total_energy(r, True) / measured_wall(r) for r in group]))
-
-
-def _wall_per_round(group):
-    return float(np.mean([measured_wall(r) / len(r["rounds"]) for r in group]))
-
-
-def latex_tables(by_eps, targets, sigma_from=None, realised_eps=None):
-    """Emit the paper's tables, every number computed here.
-
-    Exists because a hand-computed column is how a figure with no provenance
-    gets into a paper: an overhead percentage retyped from a rounded table
-    cell no longer matches the data it came from, and nobody can tell which
-    pass produced it. Paste these blocks whole; do not retype a cell.
-
-    Note the overhead column is computed from unrounded energies, so dividing
-    the DISPLAYED one-decimal cells by hand can disagree in the last digit.
-    That is the table being right, not wrong.
-    """
-    private = {e: g for e, g in by_eps.items() if not math.isinf(eps_key(e))}
-    base = [g for e, g in by_eps.items() if math.isinf(eps_key(e))]
-    if not base:
-        sys.exit("no epsilon=inf condition in this directory; "
-                 "the overhead and privacy-premium columns need a baseline.")
-    baseline = _net_per_round(base[0])
-
-    # Optional bracketed sigma column from the other dataset's sweep.
-    brackets = {}
-    if sigma_from:
-        other, other_by_eps, _ = load(Path(sigma_from))
-        for eps, group in other_by_eps.items():
-            lo = rounds_matrix(group, "sigma_min")
-            hi = rounds_matrix(group, "sigma_max")
-            if not np.isnan(lo).all():
-                brackets[eps] = (float(np.nanmin(lo)), float(np.nanmax(hi)))
-
-    # Worst realised epsilon per condition, if check_realised_epsilon.py was
-    # run with --json. Left blank rather than guessed when it was not: the
-    # realised budget needs the RDP accountant, which this script does not
-    # import.
-    realised = {}
-    if realised_eps:
-        try:
-            realised = {str(k): float(v) for k, v in
-                        json.loads(Path(realised_eps).read_text()).items()}
-        except (OSError, ValueError) as exc:
-            sys.exit(
-                f"cannot read {realised_eps}: {exc}\n"
-                "check_realised_epsilon.py writes that file only when it gets "
-                "all the way through; if it aborted, it wrote nothing. Fix the "
-                "abort, or drop --realised-eps to get the table without the "
-                "worst-spent-epsilon column."
-            )
-
-    print("% ---- Table: per-round energy. Generated by analyze.py --latex ----")
-    print("% Every cell computed from the run JSONs. Paste whole; retype nothing.")
-    print("\\begin{tabular}{lrrrrrl}")
-    print("\\hline")
-    print("$\\varepsilon$ & Gross (W) & Net (W) & Net (J/rd) & Overhead & "
-          "Worst $\\varepsilon$ & $\\sigma$ range \\\\")
-    print("\\hline")
-    overheads = []
-    for eps, group in private.items():
-        jr = _net_per_round(group)
-        over = 100 * (jr - baseline) / baseline
-        overheads.append(over)
-        lo = rounds_matrix(group, "sigma_min")
-        hi = rounds_matrix(group, "sigma_max")
-        sigma = ("---" if np.isnan(lo).all()
-                 else f"{np.nanmin(lo):.2f}--{np.nanmax(hi):.2f}")
-        if eps in brackets:
-            sigma += f" \\; [{brackets[eps][0]:.2f}--{brackets[eps][1]:.2f}]"
-        spent = f"{realised[eps]:.3f}" if eps in realised else "--"
-        print(f"{eps:<8} & {_gross_w(group):.2f} & {_net_w(group):.2f} & "
-              f"{jr:.1f} & ${over:+.1f}\\%$ & {spent} & {sigma} \\\\")
-    b = base[0]
-    print(f"$\\infty$ & {_gross_w(b):.2f} & {_net_w(b):.2f} & {baseline:.1f} & "
-          f"---       & ---   & --- \\\\")
-    print("\\hline")
-    print("\\end{tabular}")
-    if realised_eps is None:
-        print("% NOTE: the 'Worst epsilon' column is empty. Fill it with")
-        print("%   python check_realised_epsilon.py <dir> --json spent.json")
-        print("%   python analyze.py <dir> --latex --realised-eps spent.json")
-
-    jr_private = [_net_per_round(g) for g in private.values()]
-    spread_pct = 100 * (max(jr_private) - min(jr_private)) / float(np.mean(jr_private))
-    _, floor_pct = noise_floor(by_eps)
-    print("\n% ---- Sentence values for the per-round subsection ----")
-    print(f"%   private mean {np.mean(jr_private):.1f} J/round, "
-          f"baseline {baseline:.1f} J/round")
-    print(f"%   overhead: mean {np.mean(overheads):+.0f}%, "
-          f"range {min(overheads):+.1f}% to {max(overheads):+.1f}%")
-    print(f"%   spread across private conditions: {spread_pct:.1f}% of the mean")
-    print(f"%   noise floor: {floor_pct:.2f}%")
-    # Does the overhead rise with epsilon, or just scatter? A monotone rise
-    # would be a real epsilon effect; non-monotone scatter above the floor is
-    # a measurement limit, and the two call for different wording.
-    order = [100 * (_net_per_round(private[e]) - baseline) / baseline
-             for e in sorted(private, key=eps_key)]
-    if all(a < b for a, b in zip(order, order[1:])):
-        trend = "rises monotonically with epsilon -- a real epsilon effect"
-    elif all(a > b for a, b in zip(order, order[1:])):
-        trend = "falls monotonically with epsilon -- a real epsilon effect"
-    else:
-        trend = ("is NOT ordered in epsilon (non-monotone scatter), so the "
-                 "spread is a measurement limit, not a budget effect")
-    ratio_power = float(np.mean([_net_w(g) for g in private.values()])) / _net_w(base[0])
-    ratio_wall = (float(np.mean([_wall_per_round(g) for g in private.values()]))
-                  / _wall_per_round(base[0]))
-    acc_abs, acc_pct = accuracy_floor(by_eps)
-    print(f"%   private/non-private net power ratio:  {ratio_power:.3f}x")
-    print(f"%   private/non-private round duration:   {ratio_wall:.3f}x")
-    print(f"%   (their product is the per-round energy ratio: "
-          f"{ratio_power * ratio_wall:.3f}x)")
-    print(f"%   overhead across budgets {trend}")
-    print(f"%   accuracy noise floor: +/-{acc_abs:.4f} absolute "
-          f"({acc_pct:.2f}% of mean final accuracy)")
-    jr_floor, jr_floor_pct = per_round_floor(by_eps)
-    f_stat, p_value = permutation_f_test(
-        [[total_energy(r, True) / len(r["rounds"]) for r in g]
-         for g in private.values()])
-    print(f"%   per-round energy floor (same quantity as the spread): "
-          f"+/-{jr_floor:.2f} J/round ({jr_floor_pct:.1f}% of the private mean)")
-    print(f"%   permutation F-test for ANY dependence on epsilon: "
-          f"F={f_stat:.2f}, p={p_value:.3f}")
-    print("%   -> " + ("the budgets differ resolvably; do NOT claim "
-                       "epsilon-independence" if p_value < 0.05 else
-                       "no resolvable dependence on epsilon (p >= 0.05)"))
-
-    print("\n% ---- Table: energy to target accuracy ----")
-    cols = "r" * len(targets)
-    print(f"\\begin{{tabular}}{{l{cols}}}")
-    print("\\hline")
-    print("$\\varepsilon$ & " + " & ".join(f"{t:.2f}" for t in targets) + " \\\\")
-    print("\\hline")
-    for eps, group in by_eps.items():
-        cells = []
-        for t in targets:
-            j, rd, n = energy_to_target(group, t, net=True)
-            if n == 0:
-                cells.append("---")
-            else:
-                mark = "$\\ddagger$" if n < len(group) else ""
-                cells.append(f"{j:.0f}{mark} ({rd:.1f})")
-        label = "$\\infty$" if math.isinf(eps_key(eps)) else f"{eps:<8}"
-        print(f"{label} & " + " & ".join(cells) + " \\\\")
-    print("\\hline")
-    print("\\end{tabular}")
-
-    print(f"\n% ---- Table: gCO2eq per {CARBON_RUNS} runs ----")
-    base_kwh = _kwh_scaled(base[0])
-    dp_kwh = [_kwh_scaled(g) for g in private.values()]
-    print("\\begin{tabular}{lrrr}")
-    print("\\hline")
-    print("Grid & DP & No DP & Privacy \\\\")
-    print("\\hline")
-    for grid in PAPER_GRIDS:
-        factor = GRID_GCO2_PER_KWH[grid]
-        premium = sorted((k - base_kwh) * factor for k in dp_kwh)
-        lo, hi = premium[0], premium[-1]
-        span = (f"{lo:.0f}" if round(lo) == round(hi) else f"{lo:.0f}--{hi:.0f}")
-        print(f"{grid:<8}& {np.mean(dp_kwh) * factor:4.0f} & "
-              f"{base_kwh * factor:4.0f} & {span:>9} \\\\")
-    print("\\hline")
-    print("\\end{tabular}")
-
-    worst, best = "Algeria", "Norway"   # the paper's regional contrast
-    ratio = GRID_GCO2_PER_KWH[worst] / GRID_GCO2_PER_KWH[best]
-    pw = sorted((k - base_kwh) * GRID_GCO2_PER_KWH[worst] for k in dp_kwh)
-    pb = sorted((k - base_kwh) * GRID_GCO2_PER_KWH[best] for k in dp_kwh)
-    print("\n% ---- Sentence values for the carbon subsection ----")
-    print(f"%   privacy premium: {pw[0]:.0f}--{pw[-1]:.0f} gCO2eq on {worst} "
-          f"against {pb[0]:.1f}--{pb[-1]:.1f} g in {best}")
-    print(f"%   ratio {ratio:.1f}x (the grid intensities, so exact by construction)")
+    fig.savefig(f"{out}/fig2_energy_per_round.png", dpi=200)
+    print(f"\nwrote {out}/fig1_convergence.png, {out}/fig2_energy_per_round.png")
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("results", nargs="?", default="results", type=Path)
-    ap.add_argument("--check", action="store_true", help="the gate only")
-    ap.add_argument("--ablation", action="store_true",
-                    help="summarise ablation runs by varied factor")
-    ap.add_argument("--paper", action="store_true",
-                    help="configuration and measurement numbers for the write-up")
-    ap.add_argument("--latex", action="store_true",
-                    help="print the paper's tables, no column computed by hand")
-    ap.add_argument("--realised-eps", default=None,
-                    help="with --latex: JSON from check_realised_epsilon.py "
-                         "--json, to fill the worst-spent-epsilon column")
-    ap.add_argument("--no-peak-markers", action="store_true",
-                    help="draw Fig. 1 without the energy-optimal stopping "
-                         "markers")
-    ap.add_argument("--sigma-from", default=None,
-                    help="with --latex: a second results dir whose sigma ranges "
-                         "go in brackets in the per-round table")
-    ap.add_argument("--targets", default=None,
-                    help="comma-separated target accuracies, e.g. 0.5,0.7,0.85")
-    args = ap.parse_args()
+    har, cifar = load("results/har"), load("results/cifar10")
+    realised = Path("results/realised_epsilon_har.json")
+    realised = json.loads(realised.read_text()) if realised.exists() else None
 
-    runs, by_eps, dataset = load(args.results)
-    targets = (tuple(float(x) for x in args.targets.split(","))
-               if args.targets
-               else TARGET_ACCS_BY_DATASET.get(dataset, (0.15, 0.20, 0.25)))
-    print(f"dataset: {dataset}   targets: {targets}\n")
+    print("######## UCI-HAR (primary) ########")
+    per_round_energy("UCI-HAR", har, realised)
+    target_table("UCI-HAR", har, (0.40, 0.50, 0.70, 0.85))
+    stopping_rounds("UCI-HAR", har)
+    carbon_table(har)
+    ablations("UCI-HAR", "results/ablation_har", 0.70)
+    figures(har)
 
-    if args.latex:
-        latex_tables(by_eps, targets, args.sigma_from,
-                     args.realised_eps)
-    elif args.paper:
-        paper(runs, by_eps)
-    elif args.ablation:
-        print("=" * 68)
-        print("ABLATIONS")
-        print("=" * 68)
-        ablations(runs, targets)
-    elif args.check:
-        sys.exit(0 if check(by_eps, runs) else 1)
-    else:
-        check(by_eps, runs)
-        tables(by_eps, targets)
-        figures(by_eps, args.results, not args.no_peak_markers)
+    print("\n######## CIFAR-10 (secondary) ########")
+    per_round_energy("CIFAR-10", cifar)
+    target_table("CIFAR-10", cifar, (0.20,))
+    stopping_rounds("CIFAR-10", cifar)
+    final_accuracy("CIFAR-10", cifar)
+    ablations("CIFAR-10", "results/ablation_cifar10", 0.20)
 
 
 if __name__ == "__main__":

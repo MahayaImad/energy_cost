@@ -1,253 +1,91 @@
-# The Energy Cost of Privacy in Federated Learning
+# The Energy Cost of Privacy in Federated Learning — source code
 
-Measures what client-level differential privacy costs in GPU joules when
-added to federated learning, using NVML hardware counters differenced around
-each round. Two datasets: UCI-HAR, where a client is one study participant,
-and CIFAR-10 partitioned with a Dirichlet partitioner.
-
-The paper is in `paper/` (build with `pdflatex main`).
-
-## Reproduction log
-
-Every command below was actually run, in this order, and the numbers beside
-each one are the numbers the paper reports. Fill in the hardware line from
-`--paper` output; everything else is as measured.
-
-The run JSONs in this repository are the evidence. `analyze.py` reads them and
-nothing else, so no figure in the paper comes from a log line.
-
-### 0. Environment
-
-```bash
-pip install -e .                # flwr >= 1.33 is required, not preferred
-python -c "import flwr; print(flwr.__version__)"
-```
-
-`flwr < 1.33` has no `--federation-config`, so the sweep silently falls back to
-two CPU clients and NVML measures an idle card. `run_sweep.sh` refuses to start
-in that case.
-
-    GPU / torch / CUDA    <run `python analyze.py results_har/ --paper`>
-
-### 1. Phase 0 — does the privacy machinery hold up?
-
-```bash
-python verify_dp.py             # CPU, seconds, no dataset, no Flower
-```
-
-    ALL CHECKS PASS
-
-Three claims the paper makes about its own method, checked in code rather than
-asserted in prose: sigma decreases in epsilon; the DP branch takes exactly the
-same number of optimiser steps as the non-private one at every epsilon; and
-the epsilon actually spent never exceeds the epsilon claimed, which is what
-licenses the "reported epsilon is an upper bound" statement.
-
-### 2. Prepare UCI-HAR
-
-```bash
-python prepare_har.py --root "/path/to/UCI HAR Dataset"
-```
-
-Writes `data/har.npz` from the raw inertial signals (9 channels x 128 samples),
-not the 561 engineered features. Validates every shape against the published
-counts — 7352 train and 2947 test windows over 30 subjects — and then reports
-class coverage per client, which is the check that caught the original split
-bug: all 21 clients must hold all six activities on both sides.
-
-### 3. Phase 1 — the privacy sweep (primary result)
-
-```bash
-DATASET=har ROUNDS=100 ./run_sweep.sh      # -> results_har/
-```
-
-Six privacy budgets x three seeds = 18 runs, in randomised order, about 19
-minutes end to end. The script derives every sigma first (`prewarm_sigma.py`),
-then runs, then runs the gate. The gate output on the committed data:
-
-| check | result |
-| --- | --- |
-| [0] completeness | 18/18 runs, all six conditions at three seeds |
-| [1] wall-clock flatness | 47.8–48.3 s across the private conditions against 37.2 s without privacy; **1.2 % spread**, ordering collapsed into noise |
-| [2] compute parity | 89 optimiser steps per round in every condition, 0 steps of disagreement with the accountant |
-| [3] GPU residency | every client on the GPU |
-| [3b] idle baselines | median **18.21 W**, all runs within tolerance |
-| [4] noise floor | **±5.43 W (9.46 %)** — nothing smaller is reported as an effect |
-| [5] run-order drift | rho = +0.105 against execution order, −0.142 against epsilon, −0.196 between the two |
-
-`VERDICT: PASS`. Check [5] is the one that matters most: it is what separates
-a real epsilon effect from the sweep simply drifting, and the near-zero
-confound (−0.196) is what randomising the run order buys.
-
-### 3b. Audit the privacy claim against what actually ran
-
-```bash
-python check_realised_epsilon.py results_har/
-```
-
-Sigma is calibrated against the *expected* number of rounds a client joins,
-`num_rounds * fraction_train`. The realised number is a binomial draw around
-it — at 100 rounds and fraction 0.5 the expectation is 50 with a standard
-deviation of 5 — so a client sampled 60 times takes 20 % more steps than the
-accountant was paid for, and its spent epsilon exceeds the reported one.
-"Reported epsilon is an upper bound" rests on claiming no subsampling
-amplification; it does not cover over-participation. This checks it.
-
-Participation comes from `sampled_partitions`, logged every round. Per-client
-`n` and sigma are rebuilt deterministically and then *proven* against the
-logs: every round's reconstructed partition sizes must sum to the recorded
-`examples_sum`, and the reconstructed sigmas' min and max must equal the
-recorded `sigma_min` and `sigma_max`. A mismatch aborts rather than reporting
-an epsilon about a run that did not happen.
-
-### 4. Analysis — the published numbers
-
-```bash
-python analyze.py results_har/                        # tables + figures
-python analyze.py results_har/ --targets 0.40,0.50,0.70,0.85
-python analyze.py results_har/ --paper                # config and measurement
-```
-
-**Per-round energy is flat in epsilon** (Table I, Fig. 2). Net of idle,
-private training costs **21.0 J per round against 14.5 J**, an overhead of
-**+45 %**, varying by 8.2 % across the five private conditions — inside the
-9.46 % floor. So the per-round cost of privacy is a fixed implementation
-overhead, and everything budget-dependent acts through the round count.
-
-**Energy-to-target is not flat at all** (Table II). At 0.40 accuracy every
-condition costs 178–218 J: privacy is free. At 0.50 the private conditions
-cost 1.17–2.10x the non-private 204 J. At 0.70 the survivors cost **5.8x**
-(1753 J at epsilon = 4 against 300 J) and epsilon <= 2 never arrive. At 0.85,
-which the non-private model reaches in 57.7 rounds and 878 J, **no budget
-reaches it at any expenditure**.
-
-**An energy-optimal stopping round** (Fig. 1). At epsilon = 0.5 accuracy peaks
-at 0.4712 at round 17 and ends at 0.4553; the following 83 rounds cost 2477 J,
-**83 % of the run**, and buy negative accuracy.
-
-**Carbon by grid** (Table III, Fig. 3). Scaled to 1000 runs, the cost
-attributable to privacy is **105–133 gCO2eq on Algeria's grid against
-5.6–7.1 g in Norway — a factor of 18.8** for identical computation under an
-identical guarantee.
-
-### 4b. Regenerate the paper's tables
-
-```bash
-python check_realised_epsilon.py results_har/ --json spent.json
-python analyze.py results_har/ --latex --targets 0.40,0.50,0.70 \
-                  --sigma-from results/ --realised-eps spent.json
-python per_seed_peak.py results_har/            # per-seed peak and final acc
-```
-
-Prints Tables I, II and III as LaTeX, plus the sentence values for the
-per-round and carbon subsections as comments: both noise floors (energy and
-final accuracy), the private/non-private power and round-duration ratios
-whose product is the per-round energy ratio, and whether the overhead is
-ordered in epsilon or merely scattered above the floor -- a monotone rise is
-a budget effect, non-monotone scatter is a measurement limit, and the two
-call for different wording. Paste the blocks whole; do not
-retype a cell. Every column, including the overhead percentages, is computed
-from the JSONs — a figure retyped from a rounded table cell no longer matches
-the data it came from, and then nobody can say which pass produced it.
-
-The overhead column is computed from unrounded energies, so dividing the
-*displayed* one-decimal cells by hand can disagree in the last digit (20.3 /
-14.5 reads as +40.0 % where the table says +40.1 %). That is the table being
-right, not wrong.
-
-### 5. Phase 2 — ablations
-
-```bash
-SEEDS="0 1 2" DATASET=har ROUNDS=100 ./run_ablations.sh   # -> results_ablation_har/
-python analyze.py results_ablation_har/ --ablation
-```
-
-One factor at a time at epsilon in {1, inf}. On HAR only local epochs and the
-clipping norm are meaningful: a client is a participant, so the federation size
-is fixed and there is no Dirichlet parameter to vary.
-
-- **The model becomes noise-limited.** At epsilon = 1 final accuracy spans
-  2.6 % across one, two and five local epochs and 2.3 % across C in
-  {0.5, 1, 2} — both inside the 9.46 % floor. Tuning is not a route to a
-  better private model.
-- **The standard efficiency lever stops paying.** Without privacy, energy to
-  reach 0.70 falls from 304 J at one local epoch to 192 J at five, a 1.6x
-  saving. Under epsilon = 1 the saving vanishes while energy per round still
-  rises from 29 J to 64 J: local steps enter the budget, so extra local work
-  forces a larger sigma.
-- **Clipping is free in compute** — 29 J per round at all three values — so it
-  acts purely on convergence.
-
-### 6. CIFAR-10 as a secondary check
-
-```bash
-./run_sweep.sh                       # -> results/          MISSING, see below
-./run_ablations.sh                   # -> results_ablation/
-python analyze.py results_ablation/ --ablation
-```
-
-CIFAR-10 reproduces the per-round result (+60 % net of idle, flat to within
-9.6 %) and shows the stopping effect across more budgets, with peak rounds
-ordering 7, 11, 19, 24. Reaching 0.20 accuracy costs 1482 J net at epsilon = 1
-against 406 J without privacy, 3.65x. The clipping ablation inverts here:
-C = 2 peaks at 0.191 at round 8 and ends at 0.102, giving back 46.5 % of its
-peak against 3.1 % at C = 0.5.
-
-> **The `results/` directory is empty.** The CIFAR-10 main sweep behind the
-> `+60 %`, the `3.65x` and the peak-round ordering was lost before the data
-> was committed; only the CIFAR ablations survive. Re-running `./run_sweep.sh`
-> reproduces it in about 35 minutes, but the values will shift by a few
-> percent and Section IV-D would need updating. Until then those four figures
-> are reported without raw data behind them.
-
-### 7. Figures for the paper
-
-```bash
-python analyze.py results_har/       # writes the PNGs into results_har/
-cp results_har/fig1_convergence.png results_har/fig3_energy_per_round.png \
-   results_har/fig4_carbon.png paper/
-cd paper && pdflatex main && bibtex main && pdflatex main && pdflatex main
-```
-
-## The data in this repository
-
-| directory | runs | what |
-| --- | --- | --- |
-| `results_har/` | 18 | the primary sweep: 6 budgets x 3 seeds, 100 rounds |
-| `results_ablation_har/` | 27 | HAR ablations on local epochs and clipping norm |
-| `results_ablation/` | 27 | CIFAR-10 ablations, 30 rounds |
-| `results/` | 0 | the CIFAR-10 main sweep, lost (see step 6) |
-
-All committed runs post-date the per-class HAR split fix: mean `eval_acc`
-0.699 against `central_acc` 0.670, which is the right way round. Earlier
-30-round and 150-round HAR directories were trained under the broken split —
-clients holding five of six activities and validating on two — and were
-deleted rather than archived, because they read as perfectly valid to the
-analysis.
+Code and measurements for the paper *The Energy Cost of Privacy in Federated
+Learning* (I. Mahaya, A. Behloul, K. Hamouid). Federated learning on Flower
+(FedAvg), example-level local DP-SGD with Opacus, and GPU energy read from
+the NVML hardware counter around each federated round.
 
 ## Layout
 
-| file | what it does |
+| file | role |
 | --- | --- |
-| `energyfl/dp.py` | noise calibration and DP-SGD training |
-| `energyfl/task.py` | models, partitioning, train/eval loops |
-| `energyfl/client_app.py` | one round of local training |
-| `energyfl/server_app.py` | FedAvg, energy bracketing, JSON logging |
-| `energyfl/energy.py` | NVML counters and the idle baseline probe |
-| `prepare_har.py` | UCI-HAR archive -> a validated `.npz` |
-| `prewarm_sigma.py` | derives every sigma *before* measurement starts |
-| `verify_dp.py` | Phase-0 checks on the privacy accounting |
-| `per_seed_peak.py` | per-seed peak and final accuracy, one row per seed |
-| `check_realised_epsilon.py` | recomputes each client's SPENT epsilon from the logs |
-| `analyze.py` | the gate, the tables, the figures |
+| `energyfl/task.py` | models (HAR 1D CNN, CIFAR-10 CNN), data partitioning, train/test |
+| `energyfl/dp.py` | noise calibration over the whole run (Eq. 1) and DP-SGD |
+| `energyfl/client_app.py` | one round of local training (private or not) |
+| `energyfl/server_app.py` | FedAvg, NVML energy per round, idle baseline, one JSON per run |
+| `prepare_har.py` | UCI-HAR archive → `data/har.npz` |
+| `run.sh` | runs the main sweeps and the ablations |
+| `analyze.py` | every table, figure and in-text number of the paper |
+| `realised_epsilon.py` | "Worst ε" column of Table I |
+| `results/` | the measurements behind the paper (one JSON per run) |
 
-## One thing worth knowing
+## Reproducing the paper's numbers from the committed measurements
 
-`prewarm_sigma.py` is not an optimisation. Deriving a noise multiplier
-binary-searches the RDP accountant, and that search costs far more for a loose
-budget than a tight one (0.086 s at epsilon=0.5 against 0.693 s at
-epsilon=8). Run inside the federated loop, where the obvious implementation
-puts it, that cost lands inside the measurement window and scales with
-epsilon — taking exactly the shape of a cost of privacy. In one of our sweeps
-it accounted for the entire observed trend. Deriving every sigma up front is
-what keeps it out.
+Needs only `numpy` and `matplotlib`, runs in about 30 s:
+
+```bash
+pip install numpy matplotlib
+python analyze.py
+```
+
+| paper item | printed section |
+| --- | --- |
+| Table I, per-round overhead (+51% HAR, +34% CIFAR-10), wall-clock / power split, noise floors, permutation test (p = 0.27, 0.79), idle baseline | `Per-round energy` |
+| Table II, energy to target accuracy (and CIFAR-10 at 0.20) | `Net energy (J) to target accuracy` |
+| Section IV-C, stopping rounds (CIFAR-10 ε = 0.5: round 8, 60–68% of energy after it) | `Energy-optimal stopping round` |
+| Table III, carbon per 1000 runs | `gCO2eq per 1000 HAR runs` |
+| Section IV-E, ablations | `Ablations` |
+| Fig. 1, Fig. 2 | `figures/fig1_convergence.png`, `figures/fig2_energy_per_round.png` |
+
+## Re-running the experiments
+
+Needs an NVIDIA GPU whose driver exposes the total-energy counter (the paper
+used an RTX 5080, PyTorch 2.10.0+cu128, CUDA 12.8).
+
+```bash
+pip install -e .
+
+# UCI-HAR, downloaded by hand from
+# https://archive.ics.uci.edu/static/public/240/human+activity+recognition+using+smartphones.zip
+python prepare_har.py --root "/path/to/UCI HAR Dataset"
+
+./run.sh main har            # 18 runs, 100 rounds   -> results/har/
+./run.sh main cifar10        # 18 runs, 30 rounds    -> results/cifar10/
+./run.sh ablation har        # epochs, clipping norm -> results/ablation_har/
+./run.sh ablation cifar10    #                       -> results/ablation_cifar10/
+
+python realised_epsilon.py   # -> results/realised_epsilon_har.json
+python analyze.py
+```
+
+Move the committed `results/` aside first; a run whose JSON already exists is
+skipped. Fresh runs give the same conclusions, though not identical joules:
+GPU kernels are not forced to be deterministic, because that changes kernel
+selection and therefore the energy measured.
+
+## Setup (Section III)
+
+- FedAvg, 50% of clients sampled for training and 50% for evaluation per round,
+  1 local epoch, batch 32, SGD lr 0.01 momentum 0.9, seeds 0, 1, 2,
+  ε ∈ {0.5, 1, 2, 4, 8, ∞}, δ = 1e-5, clipping norm C = 1.0.
+- UCI-HAR: 21 clients, one per training participant; the 9 test participants
+  form the central test set; raw inertial signals (9 × 128); 100 rounds.
+- CIFAR-10: 20 clients, Dirichlet(α = 0.5) label partition, 30 rounds.
+- Measurement controls: every σ is computed by the server *before* the first
+  measured round (the accountant search is slower for a loose budget and would
+  otherwise create a fake ε trend); the run order of the main sweep is
+  randomised with a fixed seed; the idle baseline is probed after board power
+  settles and subtracted over the measured wall-clock only.
+
+## Notes on the committed data
+
+- CIFAR-10 ε = 4 is averaged over two seeds. In the original run of seed 0,
+  another job was using the GPU, so its idle baseline read about 300 W and
+  that run was discarded. The re-run is kept in `results/excluded/` but not
+  used: it was measured a month after the rest of the sweep (2026-10-05
+  against 2026-09-01) and is not comparable, with 82 s of measured wall-clock
+  against 67–68 s for the other two seeds.
+- `results/ablation_cifar10/` also holds single-seed runs varying the
+  Dirichlet α and the number of clients. The paper does not report them, and
+  `analyze.py` ignores them except where their configuration equals the
+  baseline cell.

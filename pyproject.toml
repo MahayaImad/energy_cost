@@ -4,25 +4,18 @@ build-backend = "hatchling.build"
 
 [project]
 name = "energyfl"
-version = "0.1.0"
-description = "Energy cost of privacy in federated learning"
+version = "1.0.0"
+description = "The Energy Cost of Privacy in Federated Learning"
 license = { file = "LICENSE" }
 dependencies = [
-    # >=1.33 is required, not merely preferred: a rebuild that silently
-    # resolved 1.31 produced runs stuck in `pending` (CLI/SuperLink version
-    # mismatch) and a SuperLink that would not start against a 1.33 state DB.
-    "flwr[simulation]>=1.33.0",
-    # Must stay below 0.6.0: flwr-datasets 0.6.0 requires rich<14, while
-    # flwr>=1.33 requires rich>=14, and pip cannot resolve both. 0.5.0
-    # declares no rich constraint at all, so it coexists with 1.33/1.34; its
-    # only overlap with flwr is numpy, at an identical range. Revisit when a
-    # flwr-datasets release relaxes the rich bound.
+    "flwr[simulation]>=1.33.0",           # needs --federation-config
     "flwr-datasets[vision]>=0.5.0,<0.6.0",
     "torch==2.10.0",
     "torchvision==0.25.0",
-    "nvidia-ml-py>=12.0.0",
-    "matplotlib",
     "opacus>=1.5.0",
+    "nvidia-ml-py>=12.0.0",
+    "numpy",
+    "matplotlib",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -31,31 +24,23 @@ packages = ["energyfl"]
 [tool.flwr.app]
 publisher = "local"
 
-
 [tool.flwr.app.components]
 serverapp = "energyfl.server_app:app"
 clientapp = "energyfl.client_app:app"
 
+# Defaults; run.sh overrides the per-run values.
 [tool.flwr.app.config]
-# Defaults for a single `flwr run .`. The sweep scripts override most of these
-# per run; anything left here is what an unadorned run uses.
+dataset = "har"                  # "har" or "cifar10"
+epsilon = "inf"                  # "inf" = non-private baseline
 seed = 0
-# "cifar10" or "har". On HAR a client is a study participant, so
-# num-supernodes must be 21, the participant count of the published
-# subject-disjoint split.
-dataset = "cifar10"
-epsilon = "inf"                  # "inf" selects the non-private baseline
-run-id = ""
-num-server-rounds = 30
-num-supernodes = 20
+run-id = "test"
+results-dir = "results/test"
+num-server-rounds = 100          # HAR 100, CIFAR-10 30
+num-supernodes = 21              # HAR 21 participants, CIFAR-10 20
 fraction-train = 0.5
 fraction-evaluate = 0.5
-dirichlet-alpha = 0.5            # CIFAR-10 only; HAR partitions by subject
+dirichlet-alpha = 0.5            # CIFAR-10 only
 batch-size = 32
 local-epochs = 1
 learning-rate = 0.01
-# Clipping norm C. FIXED at 1.0 for the main sweep; the ablation overrides it.
 clipping-norm = 1.0
-# Where run_*.json is written. The ablation script overrides it so those runs
-# never mix into the main sweep's statistics.
-results-dir = ""
