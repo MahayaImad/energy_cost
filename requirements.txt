@@ -1,0 +1,11 @@
+# Versions used for the paper (PyTorch 2.10.0+cu128, CUDA 12.8).
+# For the CUDA build of torch:
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
+flwr[simulation]==1.33.0
+flwr-datasets[vision]==0.5.0
+torch==2.10.0
+torchvision==0.25.0
+opacus==1.6.0
+nvidia-ml-py==13.610.43
+numpy
+matplotlib

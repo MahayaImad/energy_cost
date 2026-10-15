@@ -17,6 +17,7 @@ the NVML hardware counter around each federated round.
 | `run.sh` | runs the main sweeps and the ablations |
 | `analyze.py` | every table, figure and in-text number of the paper |
 | `realised_epsilon.py` | "Worst ε" column of Table I |
+| `requirements.txt` | pinned dependencies |
 | `results/` | the measurements behind the paper (one JSON per run) |
 
 ## Reproducing the paper's numbers from the committed measurements
@@ -43,7 +44,7 @@ Needs an NVIDIA GPU whose driver exposes the total-energy counter (the paper
 used an RTX 5080, PyTorch 2.10.0+cu128, CUDA 12.8).
 
 ```bash
-pip install -e .
+pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
 
 # UCI-HAR, downloaded by hand from
 # https://archive.ics.uci.edu/static/public/240/human+activity+recognition+using+smartphones.zip
